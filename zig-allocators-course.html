@@ -1,0 +1,2943 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Zig Allocators — A Deep Course</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Baskervville:ital@0;1&family=JetBrains+Mono:wght@300;400;500;700&family=Bebas+Neue&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0e0e0f;
+    --surface:   #161618;
+    --border:    #2a2a2e;
+    --accent:    #f5a623;
+    --accent2:   #e05c2a;
+    --text:      #ddd8cc;
+    --muted:     #7a7568;
+    --code-bg:   #1a1a1d;
+    --code-text: #c9d1d9;
+    --green:     #4ec9a0;
+    --red:       #e06c75;
+    --blue:      #6ba4e0;
+    --purple:    #c792ea;
+    --sidebar-w: 300px;
+    --header-h:  60px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Baskervville', Georgia, serif;
+    font-size: 18px;
+    line-height: 1.75;
+    min-height: 100vh;
+  }
+
+  /* ── HEADER ─────────────────────────────── */
+  #header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    height: var(--header-h);
+    background: var(--bg);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; padding: 0 2rem;
+    gap: 1.5rem;
+  }
+  #header h1 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.6rem;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    white-space: nowrap;
+  }
+  #header .subtitle {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+    letter-spacing: 0.05em;
+  }
+  #progress-bar {
+    margin-left: auto;
+    display: flex; align-items: center; gap: 0.75rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    color: var(--muted);
+  }
+  #progress-track {
+    width: 160px; height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  #progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent2), var(--accent));
+    border-radius: 2px;
+    transition: width 0.4s ease;
+    width: 0%;
+  }
+
+  /* ── LAYOUT ─────────────────────────────── */
+  #layout {
+    display: flex;
+    padding-top: var(--header-h);
+    min-height: 100vh;
+  }
+
+  /* ── SIDEBAR ────────────────────────────── */
+  #sidebar {
+    position: fixed;
+    top: var(--header-h);
+    left: 0;
+    width: var(--sidebar-w);
+    height: calc(100vh - var(--header-h));
+    overflow-y: auto;
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 1.5rem 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+  #sidebar::-webkit-scrollbar { width: 4px; }
+  #sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .nav-chapter {
+    padding: 0.4rem 1.5rem 0.2rem;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 0.75rem;
+    letter-spacing: 0.15em;
+    color: var(--accent);
+    margin-top: 1rem;
+  }
+  .nav-chapter:first-child { margin-top: 0; }
+
+  .nav-item {
+    display: block;
+    padding: 0.3rem 1.5rem 0.3rem 2rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--muted);
+    text-decoration: none;
+    border-left: 2px solid transparent;
+    transition: all 0.15s;
+    cursor: pointer;
+  }
+  .nav-item:hover { color: var(--text); background: rgba(245,166,35,0.05); }
+  .nav-item.active {
+    color: var(--accent);
+    border-left-color: var(--accent);
+    background: rgba(245,166,35,0.07);
+  }
+  .nav-item.exercise-link { color: #4ec9a060; }
+  .nav-item.exercise-link:hover { color: var(--green); }
+  .nav-item.completed::after {
+    content: ' ✓';
+    color: var(--green);
+  }
+
+  /* ── MAIN CONTENT ───────────────────────── */
+  #content {
+    margin-left: var(--sidebar-w);
+    flex: 1;
+    max-width: 860px;
+    padding: 3rem 4rem 6rem;
+  }
+
+  /* ── CHAPTERS ───────────────────────────── */
+  .chapter {
+    display: none;
+    animation: fadeIn 0.3s ease;
+  }
+  .chapter.active { display: block; }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* ── TYPOGRAPHY ─────────────────────────── */
+  .chapter-header {
+    margin-bottom: 3rem;
+    padding-bottom: 1.5rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .chapter-number {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 0.8rem;
+    letter-spacing: 0.2em;
+    color: var(--accent2);
+    margin-bottom: 0.5rem;
+  }
+  .chapter-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 3.2rem;
+    letter-spacing: 0.05em;
+    color: var(--text);
+    line-height: 1;
+    margin-bottom: 0.75rem;
+  }
+  .chapter-intro {
+    font-style: italic;
+    color: var(--muted);
+    font-size: 1rem;
+    max-width: 600px;
+  }
+
+  h2 {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1.8rem;
+    letter-spacing: 0.08em;
+    color: var(--text);
+    margin: 3rem 0 1rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+  }
+  h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.95rem;
+    font-weight: 500;
+    color: var(--accent);
+    margin: 2rem 0 0.75rem;
+    letter-spacing: 0.03em;
+  }
+  p { margin-bottom: 1.2rem; }
+
+  strong { color: #efe8d8; font-weight: 600; }
+  em { color: var(--accent); font-style: italic; }
+
+  a { color: var(--blue); text-decoration: none; border-bottom: 1px solid #6ba4e040; }
+  a:hover { border-bottom-color: var(--blue); }
+
+  ul, ol { margin: 0 0 1.2rem 1.5rem; }
+  li { margin-bottom: 0.4rem; }
+
+  /* ── CODE ───────────────────────────────── */
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent2);
+    border-radius: 4px;
+    padding: 1.25rem 1.5rem;
+    overflow-x: auto;
+    margin: 1.5rem 0;
+    position: relative;
+  }
+  pre code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82rem;
+    line-height: 1.7;
+    color: var(--code-text);
+    background: none;
+    padding: 0;
+  }
+  code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.82em;
+    background: var(--code-bg);
+    color: var(--green);
+    padding: 0.15em 0.4em;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+  }
+
+  /* Syntax highlighting */
+  .kw  { color: #c792ea; }
+  .ty  { color: #82aaff; }
+  .fn  { color: #82aaff; }
+  .str { color: #c3e88d; }
+  .num { color: #f78c6c; }
+  .cmt { color: #546e7a; font-style: italic; }
+  .bi  { color: #89ddff; }  /* builtin */
+  .id  { color: var(--code-text); }
+  .op  { color: #89ddff; }
+
+  /* ── CALLOUTS ───────────────────────────── */
+  .callout {
+    margin: 1.5rem 0;
+    padding: 1rem 1.25rem;
+    border-radius: 4px;
+    border-left: 3px solid;
+    font-size: 0.95rem;
+  }
+  .callout-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    margin-bottom: 0.4rem;
+    text-transform: uppercase;
+  }
+  .callout.note   { background: #6ba4e010; border-color: var(--blue);   }
+  .callout.note   .callout-title { color: var(--blue); }
+  .callout.warn   { background: #f5a62310; border-color: var(--accent); }
+  .callout.warn   .callout-title { color: var(--accent); }
+  .callout.danger { background: #e06c7510; border-color: var(--red);    }
+  .callout.danger .callout-title { color: var(--red); }
+  .callout.tip    { background: #4ec9a010; border-color: var(--green);  }
+  .callout.tip    .callout-title { color: var(--green); }
+
+  /* ── DIAGRAMS ───────────────────────────── */
+  .diagram {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 1.5rem;
+    margin: 1.5rem 0;
+    overflow-x: auto;
+  }
+  .diagram pre {
+    background: none;
+    border: none;
+    padding: 0;
+    margin: 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .diagram pre .hi { color: var(--accent); }
+  .diagram pre .hi2 { color: var(--green); }
+  .diagram pre .hi3 { color: var(--blue); }
+
+  /* ── EXERCISE BLOCKS ────────────────────── */
+  .exercise {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-top: 3px solid var(--green);
+    border-radius: 4px;
+    margin: 2.5rem 0;
+    overflow: hidden;
+  }
+  .exercise-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1rem 1.5rem;
+    background: rgba(78,201,160,0.05);
+    border-bottom: 1px solid var(--border);
+  }
+  .exercise-badge {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 0.7rem;
+    letter-spacing: 0.15em;
+    color: var(--green);
+    background: rgba(78,201,160,0.1);
+    padding: 0.2em 0.6em;
+    border-radius: 2px;
+    border: 1px solid rgba(78,201,160,0.3);
+    white-space: nowrap;
+  }
+  .exercise-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .exercise-body { padding: 1.25rem 1.5rem; }
+  .exercise-task {
+    font-size: 0.95rem;
+    margin-bottom: 1rem;
+  }
+  .exercise-task ol { margin-top: 0.5rem; }
+  .exercise-hint {
+    margin-top: 0.75rem;
+    padding: 0.75rem 1rem;
+    background: rgba(107,164,224,0.07);
+    border-left: 2px solid var(--blue);
+    border-radius: 2px;
+    font-size: 0.88rem;
+    color: var(--muted);
+  }
+  .exercise-hint summary {
+    cursor: pointer;
+    color: var(--blue);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    list-style: none;
+    user-select: none;
+  }
+  .exercise-hint summary::before { content: '▶ '; }
+  details[open] summary::before { content: '▼ '; }
+
+  .grade-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding: 0.5rem 1.1rem;
+    background: rgba(78,201,160,0.1);
+    border: 1px solid rgba(78,201,160,0.4);
+    border-radius: 3px;
+    color: var(--green);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .grade-btn:hover { background: rgba(78,201,160,0.2); border-color: var(--green); }
+  .grade-btn:active { transform: scale(0.97); }
+
+  .claude-prompt {
+    margin-top: 1rem;
+    background: #0e0e0f;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 0.75rem 1rem;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--muted);
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  .claude-prompt .prompt-label {
+    color: var(--accent2);
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    margin-bottom: 0.4rem;
+  }
+
+  /* ── CHAPTER NAV ────────────────────────── */
+  .chapter-nav {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 4rem;
+    padding-top: 2rem;
+    border-top: 1px solid var(--border);
+  }
+  .chapter-nav-btn {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    padding: 0.75rem 1.25rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: left;
+    max-width: 220px;
+  }
+  .chapter-nav-btn:hover { border-color: var(--accent); }
+  .chapter-nav-btn.next { text-align: right; margin-left: auto; }
+  .chapter-nav-btn .nav-dir {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    color: var(--muted);
+    text-transform: uppercase;
+  }
+  .chapter-nav-btn .nav-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 1rem;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+  }
+
+  /* ── TABLE ──────────────────────────────── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.5rem 0;
+    font-size: 0.9rem;
+  }
+  th {
+    background: var(--code-bg);
+    padding: 0.6rem 1rem;
+    text-align: left;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+    border-bottom: 2px solid var(--border);
+    text-transform: uppercase;
+  }
+  td {
+    padding: 0.6rem 1rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:hover td { background: rgba(255,255,255,0.02); }
+
+  /* ── MEMORY VIZ ─────────────────────────── */
+  .mem-viz {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.75rem;
+    margin: 1.5rem 0;
+  }
+  .mem-row {
+    display: flex;
+    align-items: stretch;
+    height: 2rem;
+    margin-bottom: 2px;
+  }
+  .mem-addr {
+    width: 90px;
+    display: flex;
+    align-items: center;
+    color: var(--muted);
+    flex-shrink: 0;
+    font-size: 0.65rem;
+  }
+  .mem-cell {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 3rem;
+    border: 1px solid var(--border);
+    color: var(--code-text);
+    font-size: 0.7rem;
+    margin-right: 1px;
+    transition: background 0.3s;
+  }
+  .mem-cell.used  { background: rgba(245,166,35,0.15); border-color: var(--accent2); color: var(--accent); }
+  .mem-cell.free  { background: rgba(78,201,160,0.07); }
+  .mem-cell.stack { background: rgba(107,164,224,0.15); border-color: #6ba4e080; color: var(--blue); }
+  .mem-label { padding-left: 0.5rem; color: var(--muted); font-size: 0.65rem; align-self: center; }
+
+  /* scrollbar for sidebar */
+  #sidebar { scrollbar-gutter: stable; }
+
+  /* Mobile */
+  @media (max-width: 900px) {
+    #sidebar { display: none; }
+    #content { margin-left: 0; padding: 2rem 1.5rem 4rem; }
+    .chapter-title { font-size: 2.2rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header id="header">
+  <div>
+    <h1>ZIG ALLOCATORS</h1>
+    <div class="subtitle">A COMPLETE COURSE · EXERCISES INCLUDED</div>
+  </div>
+  <div id="progress-bar">
+    <span id="progress-text">0 / 0 sections</span>
+    <div id="progress-track"><div id="progress-fill"></div></div>
+  </div>
+</header>
+
+<div id="layout">
+
+<!-- SIDEBAR -->
+<nav id="sidebar">
+  <div class="nav-chapter">PROLOGUE</div>
+  <a class="nav-item" onclick="showChapter('ch0')">0. What is an allocator?</a>
+
+  <div class="nav-chapter">CHAPTER I — THE STACK & HEAP</div>
+  <a class="nav-item" onclick="showChapter('ch1')">1.1 Stack memory</a>
+  <a class="nav-item" onclick="showChapter('ch1b')">1.2 Heap memory</a>
+  <a class="nav-item" onclick="showChapter('ch1c')">1.3 Why manual allocation?</a>
+  <a class="nav-item exercise-link" onclick="showChapter('ex1')">⬡ Exercises — Chapter I</a>
+
+  <div class="nav-chapter">CHAPTER II — THE ALLOCATOR INTERFACE</div>
+  <a class="nav-item" onclick="showChapter('ch2')">2.1 std.mem.Allocator</a>
+  <a class="nav-item" onclick="showChapter('ch2b')">2.2 alloc, free, create, destroy</a>
+  <a class="nav-item" onclick="showChapter('ch2c')">2.3 Passing allocators around</a>
+  <a class="nav-item exercise-link" onclick="showChapter('ex2')">⬡ Exercises — Chapter II</a>
+
+  <div class="nav-chapter">CHAPTER III — STANDARD ALLOCATORS</div>
+  <a class="nav-item" onclick="showChapter('ch3a')">3.1 GeneralPurposeAllocator</a>
+  <a class="nav-item" onclick="showChapter('ch3b')">3.2 ArenaAllocator</a>
+  <a class="nav-item" onclick="showChapter('ch3c')">3.3 FixedBufferAllocator</a>
+  <a class="nav-item" onclick="showChapter('ch3d')">3.4 C allocator & page allocator</a>
+  <a class="nav-item" onclick="showChapter('ch3e')">3.5 StackFallbackAllocator</a>
+  <a class="nav-item exercise-link" onclick="showChapter('ex3')">⬡ Exercises — Chapter III</a>
+
+  <div class="nav-chapter">CHAPTER IV — MEMORY SAFETY</div>
+  <a class="nav-item" onclick="showChapter('ch4a')">4.1 Leaks &amp; GPA detection</a>
+  <a class="nav-item" onclick="showChapter('ch4b')">4.2 Use-after-free</a>
+  <a class="nav-item" onclick="showChapter('ch4c')">4.3 Double-free</a>
+  <a class="nav-item" onclick="showChapter('ch4d')">4.4 Dangling pointers</a>
+  <a class="nav-item exercise-link" onclick="showChapter('ex4')">⬡ Exercises — Chapter IV</a>
+
+  <div class="nav-chapter">CHAPTER V — OWNERSHIP PATTERNS</div>
+  <a class="nav-item" onclick="showChapter('ch5a')">5.1 Who owns the allocation?</a>
+  <a class="nav-item" onclick="showChapter('ch5b')">5.2 init/deinit pattern</a>
+  <a class="nav-item" onclick="showChapter('ch5c')">5.3 Returning allocated memory</a>
+  <a class="nav-item" onclick="showChapter('ch5d')">5.4 Allocators in structs</a>
+  <a class="nav-item exercise-link" onclick="showChapter('ex5')">⬡ Exercises — Chapter V</a>
+
+  <div class="nav-chapter">CHAPTER VI — BUILDING ALLOCATORS</div>
+  <a class="nav-item" onclick="showChapter('ch6a')">6.1 The Allocator vtable</a>
+  <a class="nav-item" onclick="showChapter('ch6b')">6.2 A counting allocator</a>
+  <a class="nav-item" onclick="showChapter('ch6c')">6.3 A logging allocator</a>
+  <a class="nav-item" onclick="showChapter('ch6d')">6.4 A pool allocator</a>
+  <a class="nav-item exercise-link" onclick="showChapter('ex6')">⬡ Exercises — Chapter VI</a>
+
+  <div class="nav-chapter">EPILOGUE</div>
+  <a class="nav-item" onclick="showChapter('epilogue')">Choosing the right allocator</a>
+</nav>
+
+<!-- MAIN CONTENT -->
+<main id="content">
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 0 — WHAT IS AN ALLOCATOR?
+══════════════════════════════════════════════ -->
+<section class="chapter active" id="ch0">
+  <div class="chapter-header">
+    <div class="chapter-number">PROLOGUE</div>
+    <div class="chapter-title">What is an Allocator?</div>
+    <div class="chapter-intro">Before we write a single line of Zig, we need to understand what problem allocators actually solve — and why most languages hide them from you.</div>
+  </div>
+
+  <p>In most languages you've probably used — Python, JavaScript, Go — memory management is invisible. You create a list, the runtime handles it. You create an object, garbage is collected eventually. You never think about <em>where</em> the data lives or how long it persists.</p>
+
+  <p>Zig makes this explicit. When you want memory that outlives the current scope or whose size you don't know at compile time, you must ask for it — from an <strong>allocator</strong>. An allocator is simply an object that knows how to hand out memory and take it back.</p>
+
+  <h3>The key mental model</h3>
+  <p>Think of an allocator like a memory bank. You walk in, say "I need 64 bytes," it gives you a pointer to 64 bytes and notes the loan. Later you hand the pointer back and say "I'm done," and it marks those bytes as available again.</p>
+
+  <div class="diagram">
+<pre>
+  Your code                    Allocator
+  ─────────                    ─────────
+  <span class="hi">alloc(64)</span>    ──────────▶  finds 64 free bytes
+               ◀──────────  returns *[64]u8 ptr
+  
+  [use ptr...]
+  
+  <span class="hi2">free(ptr)</span>    ──────────▶  marks those 64 bytes free
+</pre>
+  </div>
+
+  <p>What makes Zig interesting is that <strong>there is no single global allocator</strong>. In C, <code>malloc</code> always calls into the system heap. In Zig, the allocator is passed as a parameter, which means:</p>
+  <ul>
+    <li>You can swap allocators without changing your data structures</li>
+    <li>You can use a fast arena for a request, then free everything at once</li>
+    <li>You can use a fixed buffer instead of the heap in embedded contexts</li>
+    <li>You can wrap any allocator to add logging, leak detection, or limits</li>
+  </ul>
+
+  <h3>Why does this matter to you right now?</h3>
+  <p>You've been writing Zig for ~75 exercises. You've seen <code>std.ArrayList</code>, you may have seen <code>std.mem.Allocator</code> parameters — now you'll understand exactly what those mean and how to use them confidently.</p>
+
+  <div class="callout tip">
+    <div class="callout-title">How to use this course</div>
+    Each chapter ends with exercises. The exercise blocks contain a "Grade with Claude Code" button that copies a prompt to your clipboard — paste it into Claude Code (which can see your repo files) and it will grade your work. Work through each exercise before moving on.
+  </div>
+
+  <div class="chapter-nav">
+    <div></div>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch1')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Stack Memory</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 1.1 — STACK MEMORY
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch1">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER I · SECTION 1</div>
+    <div class="chapter-title">Stack Memory</div>
+    <div class="chapter-intro">The stack is Zig's default memory region — fast, automatic, and strictly scoped.</div>
+  </div>
+
+  <p>Every variable you've declared in a Zig function so far has lived on the <strong>stack</strong>. The stack is a region of memory managed automatically by the CPU as functions are called and returned.</p>
+
+  <h3>How the stack works</h3>
+  <p>When you call a function, the CPU advances a pointer called the <em>stack pointer</em> to carve out space for that function's local variables. When the function returns, the stack pointer moves back — instantly reclaiming all that space.</p>
+
+  <div class="diagram">
+<pre>
+  call <span class="hi">main()</span>
+  ┌──────────────────────────────┐  ◀ stack pointer (high addr)
+  │   main: x: u32 = 5          │
+  │   main: arr: [3]u8           │
+  │                              │
+  │   call <span class="hi2">foo()</span>               │
+  │   ┌──────────────────────┐   │
+  │   │  foo: temp: i32 = 0  │   │  ◀ stack pointer moves here
+  │   │  foo: buf: [64]u8    │   │
+  │   └──────────────────────┘   │
+  │   (foo returns, SP resets)   │
+  │                              │
+  └──────────────────────────────┘  ◀ stack grows downward
+</pre>
+  </div>
+
+  <p>Key properties of the stack:</p>
+  <ul>
+    <li><strong>Size known at compile time</strong> — every variable's size must be known before the program runs</li>
+    <li><strong>Lifetime tied to scope</strong> — a local variable ceases to exist when its function returns</li>
+    <li><strong>Extremely fast</strong> — just a pointer increment/decrement, no bookkeeping</li>
+    <li><strong>Limited in size</strong> — typically 1–8 MB; overflow causes a crash (stack overflow)</li>
+  </ul>
+
+  <h3>In Zig</h3>
+<pre><code><span class="kw">fn</span> <span class="fn">example</span>() <span class="ty">void</span> {
+    <span class="kw">var</span> x: <span class="ty">u32</span> = <span class="num">42</span>;           <span class="cmt">// stack-allocated</span>
+    <span class="kw">var</span> buf: [<span class="num">128</span>]<span class="ty">u8</span> = <span class="bi">undefined</span>; <span class="cmt">// stack-allocated</span>
+    <span class="kw">var</span> point = Point{ .x = <span class="num">1</span>, .y = <span class="num">2</span> }; <span class="cmt">// stack-allocated</span>
+    <span class="cmt">// All of the above are freed automatically when example() returns</span>
+}</code></pre>
+
+  <p>Notice there is no allocator involved here at all. The compiler knows the size of <code>u32</code>, <code>[128]u8</code>, and <code>Point</code> at compile time, so it can reserve exactly the right amount of stack space before the function even runs.</p>
+
+  <div class="callout warn">
+    <div class="callout-title">A common mistake</div>
+    Returning a pointer to a stack variable is undefined behavior in Zig (and C). The pointer becomes dangling the moment the function returns. We'll cover this in detail in Chapter IV.
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch0')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">What is an Allocator?</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch1b')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Heap Memory</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 1.2 — HEAP MEMORY
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch1b">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER I · SECTION 2</div>
+    <div class="chapter-title">Heap Memory</div>
+    <div class="chapter-intro">The heap is where dynamic, runtime-sized, long-lived allocations live.</div>
+  </div>
+
+  <p>The <strong>heap</strong> is a large region of memory managed at runtime. Unlike the stack, allocations here don't have to be a fixed size, and they can outlive the function that created them. The tradeoff: you manage it yourself.</p>
+
+  <div class="diagram">
+<pre>
+  Virtual Address Space
+  ┌─────────────────────────────┐  high addr
+  │  Stack (grows down ↓)       │
+  │  ...                        │
+  │                             │
+  │    [free space]             │
+  │                             │
+  │  ...                        │
+  │  Heap (grows up ↑)          │
+  │  ┌───┐ ┌─────┐ ┌──┐        │
+  │  │<span class="hi"> A </span>│ │<span class="hi2">  B  </span>│ │<span class="hi3">C </span>│ ...    │
+  │  └───┘ └─────┘ └──┘        │
+  ├─────────────────────────────┤
+  │  BSS / Data (globals)       │
+  ├─────────────────────────────┤
+  │  Text (code)                │
+  └─────────────────────────────┘  low addr
+</pre>
+  </div>
+
+  <p>Each block (A, B, C above) was requested at runtime via <code>alloc</code>. They can be different sizes, created in any order, and freed independently. The heap manager tracks which regions are free.</p>
+
+  <h3>When do you need the heap?</h3>
+  <ul>
+    <li>The size of your data is not known until runtime (user input, file contents)</li>
+    <li>You need the data to outlive the function that created it</li>
+    <li>The data is too large for the stack (large arrays, trees, graphs)</li>
+    <li>You need a variable number of items (dynamic arrays, hash maps)</li>
+  </ul>
+
+  <h3>In Zig — the first taste</h3>
+<pre><code><span class="kw">const</span> std = <span class="bi">@import</span>(<span class="str">"std"</span>);
+
+<span class="kw">pub fn</span> <span class="fn">main</span>() !<span class="ty">void</span> {
+    <span class="kw">var</span> gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    <span class="kw">const</span> allocator = gpa.allocator();
+
+    <span class="cmt">// Allocate space for 10 u32s on the heap</span>
+    <span class="kw">const</span> nums = <span class="kw">try</span> allocator.alloc(<span class="ty">u32</span>, <span class="num">10</span>);
+    <span class="kw">defer</span> allocator.free(nums);
+
+    <span class="kw">for</span> (nums, <span class="num">0</span>..) |*n, i| n.* = <span class="bi">@intCast</span>(i * i);
+
+    std.debug.print(<span class="str">"nums[5] = {}\n"</span>, .{nums[<span class="num">5</span>]});
+}
+</code></pre>
+
+  <p>Three things to notice:</p>
+  <ol>
+    <li>We create a <em>concrete</em> allocator (<code>GeneralPurposeAllocator</code>) and call <code>.allocator()</code> to get the generic <code>std.mem.Allocator</code> interface</li>
+    <li><code>alloc(T, n)</code> returns a <code>[]T</code> slice — heap-backed, runtime-sized</li>
+    <li><code>defer allocator.free(nums)</code> ensures cleanup — the heap does <em>not</em> free itself</li>
+  </ol>
+
+  <div class="callout note">
+    <div class="callout-title">Heap vs Stack — Quick Reference</div>
+    <table>
+      <tr><th>Property</th><th>Stack</th><th>Heap</th></tr>
+      <tr><td>Size known at</td><td>Compile time</td><td>Runtime</td></tr>
+      <tr><td>Allocation speed</td><td>Instant (pointer bump)</td><td>Variable (bookkeeping)</td></tr>
+      <tr><td>Lifetime</td><td>Current scope</td><td>Manual (until free)</td></tr>
+      <tr><td>Size limit</td><td>~1–8 MB typical</td><td>Limited by RAM/VM</td></tr>
+      <tr><td>Managed by</td><td>CPU / compiler</td><td>You (via allocator)</td></tr>
+    </table>
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch1')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Stack Memory</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch1c')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Why Manual Allocation?</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 1.3 — WHY MANUAL?
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch1c">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER I · SECTION 3</div>
+    <div class="chapter-title">Why Manual Allocation?</div>
+    <div class="chapter-intro">Garbage collectors are convenient — but convenience has a cost.</div>
+  </div>
+
+  <p>You might be wondering: Go, Java, Python — all manage memory for you. Why would Zig make you do it manually? Let's be specific about what you're actually trading.</p>
+
+  <h3>What a garbage collector does</h3>
+  <p>A GC periodically scans the heap, finds unreachable objects, and frees them. From your perspective as a programmer, memory just… goes away when you're done with it. This is genuinely ergonomic.</p>
+
+  <p>But a GC requires:</p>
+  <ul>
+    <li>A <strong>runtime</strong> — a background process/goroutine watching memory</li>
+    <li><strong>Stop-the-world pauses</strong> (or concurrent marking, which is complex and has overhead) — your program may pause for milliseconds</li>
+    <li><strong>Extra memory overhead</strong> — the GC needs headroom to avoid running constantly; Go recommends 2× your live heap size</li>
+    <li><strong>Non-deterministic timing</strong> — you can't predict <em>when</em> memory is freed</li>
+  </ul>
+
+  <h3>What you get from manual allocation</h3>
+  <ul>
+    <li><strong>Predictable performance</strong> — no pauses, no surprise GC cycles</li>
+    <li><strong>Minimal overhead</strong> — you pay only for what you allocate</li>
+    <li><strong>No runtime required</strong> — Zig can target bare metal, kernels, WebAssembly with no runtime</li>
+    <li><strong>Control over allocator strategy</strong> — use an arena for a request, a pool for fixed-size objects, a stack allocator for temporary work</li>
+  </ul>
+
+  <h3>What Zig adds over C</h3>
+  <p>C also has manual allocation, but via the global <code>malloc</code>/<code>free</code>. Zig improves on this in several ways:</p>
+  <ul>
+    <li>Allocators are <strong>passed as parameters</strong>, not global — testable, swappable</li>
+    <li>The <code>GeneralPurposeAllocator</code> detects leaks and double-frees in debug mode</li>
+    <li>Zig's type system catches many common errors at compile time</li>
+    <li>No implicit hidden allocations — if a function allocates, it takes an allocator param</li>
+  </ul>
+
+  <div class="callout tip">
+    <div class="callout-title">The Zig philosophy on allocation</div>
+    Zig follows a design principle: <em>if a function allocates, it must accept an allocator parameter</em>. This means you can audit any function signature and know whether it will touch the heap. No hidden allocations.
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch1b')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Heap Memory</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ex1')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Exercises — Chapter I</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     EXERCISES — CHAPTER I
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ex1">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER I · EXERCISES</div>
+    <div class="chapter-title">Stack &amp; Heap</div>
+    <div class="chapter-intro">Solidify your mental model before touching the allocator API.</div>
+  </div>
+
+  <!-- Exercise 1 -->
+  <div class="exercise" id="exercise-1-1">
+    <div class="exercise-header">
+      <span class="exercise-badge">Exercise 1.1</span>
+      <span class="exercise-title">Stack vs Heap Classification</span>
+    </div>
+    <div class="exercise-body">
+      <div class="exercise-task">
+        <p>Create a file <code>ex1_1.zig</code>. Write a comment above each variable below classifying it as <strong>stack</strong> or <strong>heap</strong>, and explaining why in one sentence. Then make the file compile and run.</p>
+<pre><code><span class="kw">const</span> std = <span class="bi">@import</span>(<span class="str">"std"</span>);
+
+<span class="kw">pub fn</span> <span class="fn">main</span>() !<span class="ty">void</span> {
+    <span class="cmt">// ??? classify this:</span>
+    <span class="kw">var</span> a: <span class="ty">u64</span> = <span class="num">100</span>;
+
+    <span class="cmt">// ??? classify this:</span>
+    <span class="kw">var</span> b: [<span class="num">512</span>]<span class="ty">u8</span> = <span class="bi">undefined</span>;
+
+    <span class="kw">var</span> gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    <span class="kw">const</span> allocator = gpa.allocator();
+
+    <span class="cmt">// ??? classify this:</span>
+    <span class="kw">const</span> c = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">512</span>);
+    <span class="kw">defer</span> allocator.free(c);
+
+    <span class="cmt">// ??? classify this:</span>
+    <span class="kw">const</span> d = <span class="kw">try</span> allocator.create(<span class="ty">u64</span>);
+    <span class="kw">defer</span> allocator.destroy(d);
+
+    _ = a; _ = b;
+    std.debug.print(<span class="str">"ok\n"</span>, .{});
+}</code></pre>
+      </div>
+      <details class="exercise-hint">
+        <summary>HINT</summary>
+        <p>Ask yourself: does the compiler know the size at compile time? Does the lifetime extend beyond the function? The answers tell you which region is used.</p>
+      </details>
+      <button class="grade-btn" onclick="copyGradePrompt('1.1')">⬡ Copy grade prompt</button>
+      <div class="claude-prompt" id="grade-1.1">
+        <div class="prompt-label">Paste this into Claude Code</div>
+        Please grade my solution for exercise 1.1 from the Zig Allocators course. Read the file `ex1_1.zig` in my current directory. Check that:
+1. Each variable (a, b, c, d) has a comment above it classifying it as stack or heap.
+2. The classification is correct (a=stack, b=stack, c=heap, d=heap).
+3. The explanation for each is accurate and demonstrates understanding.
+4. The file compiles and runs without errors (`zig run ex1_1.zig`).
+Give specific feedback on any incorrect classifications or explanations. If everything is correct, say so clearly.
+      </div>
+    </div>
+  </div>
+
+  <!-- Exercise 2 -->
+  <div class="exercise" id="exercise-1-2">
+    <div class="exercise-header">
+      <span class="exercise-badge">Exercise 1.2</span>
+      <span class="exercise-title">Heap-allocated string</span>
+    </div>
+    <div class="exercise-body">
+      <div class="exercise-task">
+        <p>Create <code>ex1_2.zig</code>. Using a <code>GeneralPurposeAllocator</code>, allocate a <code>[]u8</code> of exactly the right size to hold the string <code>"hello, allocator"</code>, copy the string into it, print it, then free it. Do <em>not</em> hardcode the length — use <code>source.len</code>.</p>
+        <ol>
+          <li>Declare a <code>const source = "hello, allocator";</code></li>
+          <li>Allocate <code>source.len</code> bytes</li>
+          <li>Copy with <code>@memcpy</code></li>
+          <li>Print the result</li>
+          <li>Free the allocation</li>
+        </ol>
+      </div>
+      <details class="exercise-hint">
+        <summary>HINT</summary>
+        <p><code>@memcpy(dest, src)</code> copies bytes. The dest and src must have the same length. <code>allocator.alloc(u8, n)</code> returns <code>[]u8</code>.</p>
+      </details>
+      <button class="grade-btn" onclick="copyGradePrompt('1.2')">⬡ Copy grade prompt</button>
+      <div class="claude-prompt" id="grade-1.2">
+        <div class="prompt-label">Paste this into Claude Code</div>
+        Please grade my solution for exercise 1.2 from the Zig Allocators course. Read `ex1_2.zig`. Check:
+1. A GPA is created and `.allocator()` is called to get the allocator.
+2. `source.len` (or equivalent) is used for the allocation size, not a hardcoded number.
+3. `@memcpy` or equivalent is used to copy the string.
+4. The allocation is freed (either explicitly or via defer).
+5. The program compiles and prints "hello, allocator".
+Run `zig run ex1_2.zig` and verify the output. Give specific feedback on anything that's wrong or could be improved.
+      </div>
+    </div>
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch1c')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Why Manual Allocation?</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch2')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">The Allocator Interface</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 2.1 — THE ALLOCATOR INTERFACE
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch2">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER II · SECTION 1</div>
+    <div class="chapter-title">std.mem.Allocator</div>
+    <div class="chapter-intro">The interface that makes every concrete allocator interchangeable.</div>
+  </div>
+
+  <p>In Zig, <code>std.mem.Allocator</code> is an interface — specifically, a struct containing a pointer to the underlying allocator and a vtable (a set of function pointers). This is Zig's way of doing runtime polymorphism without inheritance.</p>
+
+  <h3>The two-layer structure</h3>
+  <p>You'll always see this pattern:</p>
+
+<pre><code><span class="cmt">// 1. The CONCRETE allocator — owns the actual memory management logic</span>
+<span class="kw">var</span> gpa = std.heap.GeneralPurposeAllocator(.{}){};
+
+<span class="cmt">// 2. The INTERFACE — a thin wrapper you pass around</span>
+<span class="kw">const</span> allocator: std.mem.Allocator = gpa.allocator();</code></pre>
+
+  <p>The concrete allocator (<code>GeneralPurposeAllocator</code>, <code>ArenaAllocator</code>, etc.) is a struct that lives somewhere — usually on your stack or as a field in another struct. The <code>allocator()</code> method returns a <code>std.mem.Allocator</code> which is just a fat pointer: a pointer to the concrete allocator, plus a vtable of function pointers.</p>
+
+  <div class="diagram">
+<pre>
+  std.mem.Allocator (on your stack, 16 bytes)
+  ┌─────────────────────────────────┐
+  │ ptr  ──────────────────────────▶│  GeneralPurposeAllocator instance
+  │ vtable ────────────────────────▶│  { .alloc = gpa_alloc,
+  └─────────────────────────────────┘    .resize = gpa_resize,
+                                         .free = gpa_free }
+</pre>
+  </div>
+
+  <p>This means any code that accepts <code>std.mem.Allocator</code> can work with any backing allocator — swap GPA for Arena or FixedBuffer and the code doesn't change at all.</p>
+
+  <h3>What's on the vtable?</h3>
+  <p>The vtable has three slots:</p>
+  <ul>
+    <li><code>alloc</code> — allocates a new region</li>
+    <li><code>resize</code> — tries to resize an existing allocation in-place</li>
+    <li><code>free</code> — releases a region</li>
+  </ul>
+  <p>You rarely call these directly — you use the higher-level methods we'll cover next.</p>
+
+  <div class="callout note">
+    <div class="callout-title">This is Zig's interface pattern</div>
+    <code>std.mem.Allocator</code> is the canonical example of Zig interfaces. You'll see this same vtable pattern used elsewhere in the stdlib — <code>std.io.Reader</code>, <code>std.io.Writer</code>, etc. Learning allocators teaches you the pattern itself.
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ex1')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Exercises — Chapter I</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch2b')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">alloc, free, create, destroy</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 2.2 — alloc, free, create, destroy
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch2b">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER II · SECTION 2</div>
+    <div class="chapter-title">alloc, free, create, destroy</div>
+    <div class="chapter-intro">The four core operations on std.mem.Allocator.</div>
+  </div>
+
+  <p>The <code>std.mem.Allocator</code> interface exposes several methods. Four are essential and you'll use them constantly.</p>
+
+  <h3>alloc — allocate a slice</h3>
+<pre><code><span class="kw">fn</span> <span class="fn">alloc</span>(<span class="kw">comptime</span> T: <span class="ty">type</span>, n: <span class="ty">usize</span>) error{OutOfMemory}![]T</code></pre>
+  <p>Allocates space for <code>n</code> items of type <code>T</code>. Returns a slice <code>[]T</code>. <strong>The memory is not initialized</strong> — it contains garbage. Use <code>@memset</code> or <code>std.mem.zeroes</code> if you need zeroed memory.</p>
+
+<pre><code><span class="kw">const</span> nums = <span class="kw">try</span> allocator.alloc(<span class="ty">u32</span>, <span class="num">100</span>);   <span class="cmt">// []u32, length 100</span>
+<span class="kw">defer</span> allocator.free(nums);
+<span class="bi">@memset</span>(nums, <span class="num">0</span>);                              <span class="cmt">// zero it if needed</span></code></pre>
+
+  <h3>free — release a slice</h3>
+<pre><code><span class="kw">fn</span> <span class="fn">free</span>(memory: <span class="kw">anytype</span>) <span class="ty">void</span></code></pre>
+  <p>Releases memory previously returned by <code>alloc</code>. You must pass the <em>exact same slice</em> — same pointer, same length. Passing a sub-slice is undefined behavior.</p>
+
+  <h3>create — allocate a single value</h3>
+<pre><code><span class="kw">fn</span> <span class="fn">create</span>(<span class="kw">comptime</span> T: <span class="ty">type</span>) error{OutOfMemory}!*T</code></pre>
+  <p>Allocates space for a single value of type <code>T</code>. Returns a pointer <code>*T</code>. Think of it as <code>alloc(T, 1)</code> but returning a pointer instead of a slice.</p>
+
+<pre><code><span class="kw">const</span> node = <span class="kw">try</span> allocator.create(Node);   <span class="cmt">// *Node</span>
+<span class="kw">defer</span> allocator.destroy(node);
+node.* = Node{ .value = <span class="num">42</span>, .next = <span class="kw">null</span> };</code></pre>
+
+  <h3>destroy — release a single value</h3>
+<pre><code><span class="kw">fn</span> <span class="fn">destroy</span>(ptr: <span class="kw">anytype</span>) <span class="ty">void</span></code></pre>
+  <p>Releases memory returned by <code>create</code>. Pair exactly: <code>alloc</code>/<code>free</code>, <code>create</code>/<code>destroy</code>.</p>
+
+  <h3>Also useful: dupe</h3>
+<pre><code><span class="kw">const</span> copy = <span class="kw">try</span> allocator.dupe(<span class="ty">u8</span>, original_slice);
+<span class="kw">defer</span> allocator.free(copy);</code></pre>
+  <p><code>dupe</code> allocates a copy of an existing slice. Very common for strings.</p>
+
+  <h3>Summary</h3>
+  <table>
+    <tr><th>Method</th><th>Returns</th><th>Free with</th><th>Use for</th></tr>
+    <tr><td><code>alloc(T, n)</code></td><td><code>[]T</code></td><td><code>free</code></td><td>Arrays, slices</td></tr>
+    <tr><td><code>create(T)</code></td><td><code>*T</code></td><td><code>destroy</code></td><td>Single structs, nodes</td></tr>
+    <tr><td><code>dupe(T, slice)</code></td><td><code>[]T</code></td><td><code>free</code></td><td>Copying slices</td></tr>
+    <tr><td><code>realloc(old, n)</code></td><td><code>[]T</code></td><td><code>free</code></td><td>Resizing (like C realloc)</td></tr>
+  </table>
+
+  <div class="callout danger">
+    <div class="callout-title">Never mix the pairs</div>
+    Freeing an <code>alloc</code> result with <code>destroy</code>, or a <code>create</code> result with <code>free</code>, is undefined behavior. In debug mode, the GPA will catch this.
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch2')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">std.mem.Allocator</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch2c')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Passing Allocators Around</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 2.3 — PASSING ALLOCATORS
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch2c">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER II · SECTION 3</div>
+    <div class="chapter-title">Passing Allocators Around</div>
+    <div class="chapter-intro">The convention that makes Zig code composable and testable.</div>
+  </div>
+
+  <p>The most important design principle in Zig's allocator system: <strong>functions that allocate take an allocator as a parameter</strong>. They never reach for a global allocator. This has profound consequences for how you structure programs.</p>
+
+  <h3>The correct pattern</h3>
+<pre><code><span class="cmt">// CORRECT — caller decides the allocation strategy</span>
+<span class="kw">fn</span> <span class="fn">buildMessage</span>(allocator: std.mem.Allocator, name: []<span class="kw">const</span> <span class="ty">u8</span>) ![]<span class="ty">u8</span> {
+    <span class="kw">return</span> std.fmt.allocPrint(allocator, <span class="str">"Hello, {s}!"</span>, .{name});
+}
+
+<span class="cmt">// WRONG — hidden allocation, caller can't control strategy</span>
+<span class="kw">var</span> global_alloc = std.heap.page_allocator;
+<span class="kw">fn</span> <span class="fn">buildMessageBad</span>(name: []<span class="kw">const</span> <span class="ty">u8</span>) ![]<span class="ty">u8</span> {
+    <span class="kw">return</span> std.fmt.allocPrint(global_alloc, <span class="str">"Hello, {s}!"</span>, .{name});
+}</code></pre>
+
+  <h3>Why does this matter?</h3>
+  <p>When the allocator is a parameter, the caller can choose:</p>
+<pre><code><span class="cmt">// In tests: use a test allocator that detects leaks</span>
+<span class="kw">const</span> msg = <span class="kw">try</span> buildMessage(std.testing.allocator, <span class="str">"world"</span>);
+<span class="kw">defer</span> std.testing.allocator.free(msg);
+
+<span class="cmt">// In a web server: use an arena per-request, free everything at once</span>
+<span class="kw">var</span> arena = std.heap.ArenaAllocator.init(gpa.allocator());
+<span class="kw">defer</span> arena.deinit();
+<span class="kw">const</span> msg = <span class="kw">try</span> buildMessage(arena.allocator(), <span class="str">"world"</span>);
+<span class="cmt">// no need to free msg individually — arena.deinit() handles it</span></code></pre>
+
+  <h3>Where in the parameter list?</h3>
+  <p>By convention, allocator is the <em>first</em> parameter when it's needed:</p>
+<pre><code><span class="kw">fn</span> <span class="fn">parseJson</span>(allocator: std.mem.Allocator, input: []<span class="kw">const</span> <span class="ty">u8</span>) !Value { ... }
+<span class="kw">fn</span> <span class="fn">readFile</span>(allocator: std.mem.Allocator, path: []<span class="kw">const</span> <span class="ty">u8</span>) ![]<span class="ty">u8</span> { ... }
+<span class="kw">fn</span> <span class="fn">cloneList</span>(allocator: std.mem.Allocator, list: List) !List { ... }</code></pre>
+
+  <h3>Structs that need an allocator</h3>
+  <p>When a struct needs to allocate, it stores the allocator as a field — <em>not</em> the concrete type, but the interface:</p>
+<pre><code><span class="kw">const</span> MyBuffer = <span class="kw">struct</span> {
+    allocator: std.mem.Allocator,
+    data: []<span class="ty">u8</span>,
+
+    <span class="kw">pub fn</span> <span class="fn">init</span>(allocator: std.mem.Allocator, size: <span class="ty">usize</span>) !MyBuffer {
+        <span class="kw">return</span> .{
+            .allocator = allocator,
+            .data = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, size),
+        };
+    }
+
+    <span class="kw">pub fn</span> <span class="fn">deinit</span>(self: MyBuffer) <span class="ty">void</span> {
+        self.allocator.free(self.data);
+    }
+};</code></pre>
+
+  <div class="callout tip">
+    <div class="callout-title">Reading stdlib signatures</div>
+    Now when you see <code>std.ArrayList(T).init(allocator)</code> or <code>std.StringHashMap(V).init(allocator)</code>, you know exactly what's happening: you're handing the data structure an allocator it will use for all internal allocations, and you're responsible for calling <code>deinit()</code> when done.
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch2b')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">alloc, free, create, destroy</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ex2')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Exercises — Chapter II</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     EXERCISES — CHAPTER II
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ex2">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER II · EXERCISES</div>
+    <div class="chapter-title">The Allocator Interface</div>
+    <div class="chapter-intro">Practice the core API and the passing convention.</div>
+  </div>
+
+  <div class="exercise" id="exercise-2-1">
+    <div class="exercise-header">
+      <span class="exercise-badge">Exercise 2.1</span>
+      <span class="exercise-title">Linked list with create/destroy</span>
+    </div>
+    <div class="exercise-body">
+      <div class="exercise-task">
+        <p>Create <code>ex2_1.zig</code>. Define a singly-linked list node, build a list of integers 1–5 using <code>allocator.create()</code>, print each value by walking the list, then free all nodes using <code>allocator.destroy()</code>.</p>
+        <ol>
+          <li>Define <code>const Node = struct { value: i32, next: ?*Node };</code></li>
+          <li>Use a GPA. Create 5 nodes on the heap.</li>
+          <li>Link them: <code>1 -> 2 -> 3 -> 4 -> 5 -> null</code></li>
+          <li>Walk and print each value</li>
+          <li>Walk and destroy each node (careful: read <code>next</code> before destroying!)</li>
+        </ol>
+      </div>
+      <details class="exercise-hint">
+        <summary>HINT</summary>
+        <p>To free a linked list, you need to save <code>current.next</code> before calling <code>destroy(current)</code> — after destroy, the memory is gone and reading <code>current.next</code> is undefined behavior.</p>
+      </details>
+      <button class="grade-btn" onclick="copyGradePrompt('2.1')">⬡ Copy grade prompt</button>
+      <div class="claude-prompt" id="grade-2.1">
+        <div class="prompt-label">Paste this into Claude Code</div>
+        Please grade my solution for exercise 2.1 from the Zig Allocators course. Read `ex2_1.zig`. Check:
+1. A Node struct is defined with `value` and `next` fields.
+2. Nodes are allocated with `allocator.create(Node)` (not `alloc`).
+3. Nodes are freed with `allocator.destroy()`.
+4. The code reads `current.next` BEFORE destroying the current node (correct free order).
+5. The program compiles with `zig run ex2_1.zig` and prints values 1 through 5.
+Run it and verify output. Note any memory safety issues in the free loop.
+      </div>
+    </div>
+  </div>
+
+  <div class="exercise" id="exercise-2-2">
+    <div class="exercise-header">
+      <span class="exercise-badge">Exercise 2.2</span>
+      <span class="exercise-title">Allocator-parameterized function</span>
+    </div>
+    <div class="exercise-body">
+      <div class="exercise-task">
+        <p>Create <code>ex2_2.zig</code>. Write a function <code>repeat(allocator, str, n)</code> that returns a newly allocated <code>[]u8</code> containing <code>str</code> repeated <code>n</code> times. The caller owns the returned memory.</p>
+        <ol>
+          <li>Signature: <code>fn repeat(allocator: std.mem.Allocator, str: []const u8, n: usize) ![]u8</code></li>
+          <li>Allocate <code>str.len * n</code> bytes</li>
+          <li>Fill using a loop and <code>@memcpy</code></li>
+          <li>In <code>main</code>, call it and print the result, then free it</li>
+        </ol>
+      </div>
+      <details class="exercise-hint">
+        <summary>HINT</summary>
+        <p>To copy into a sub-slice: <code>@memcpy(result[i * str.len ..][0..str.len], str);</code></p>
+      </details>
+      <button class="grade-btn" onclick="copyGradePrompt('2.2')">⬡ Copy grade prompt</button>
+      <div class="claude-prompt" id="grade-2.2">
+        <div class="prompt-label">Paste this into Claude Code</div>
+        Please grade my solution for exercise 2.2 from the Zig Allocators course. Read `ex2_2.zig`. Check:
+1. The function signature takes `allocator` as first parameter.
+2. Allocation size is correctly `str.len * n`.
+3. The string is correctly repeated in the buffer.
+4. The caller (main) frees the returned memory.
+5. `zig run ex2_2.zig` compiles and outputs the repeated string correctly.
+Test it mentally or by running it. Suggest improvements if appropriate.
+      </div>
+    </div>
+  </div>
+
+  <div class="exercise" id="exercise-2-3">
+    <div class="exercise-header">
+      <span class="exercise-badge">Exercise 2.3</span>
+      <span class="exercise-title">A struct with an allocator field</span>
+    </div>
+    <div class="exercise-body">
+      <div class="exercise-task">
+        <p>Create <code>ex2_3.zig</code>. Implement a <code>StringBuffer</code> struct that wraps a heap-allocated <code>[]u8</code> and supports appending a single character at a time by reallocating.</p>
+        <ol>
+          <li>Fields: <code>allocator: std.mem.Allocator</code>, <code>data: []u8</code>, <code>len: usize</code></li>
+          <li><code>init(allocator)</code> — starts with an empty 0-length alloc (or capacity 0)</li>
+          <li><code>append(self, ch: u8)</code> — uses <code>allocator.realloc(self.data, self.len + 1)</code> and appends the char</li>
+          <li><code>deinit(self)</code> — frees the data</li>
+          <li>In main: build the string "zig" one character at a time, print it, deinit</li>
+        </ol>
+      </div>
+      <details class="exercise-hint">
+        <summary>HINT</summary>
+        <p><code>realloc</code> returns a new slice — assign it back: <code>self.data = try self.allocator.realloc(self.data, new_len);</code>. For the initial alloc with 0 length, you can start with an empty slice: <code>data: &[0]u8{}</code> but realloc won't work on that — start with capacity 0 using <code>alloc(u8, 0)</code>.</p>
+      </details>
+      <button class="grade-btn" onclick="copyGradePrompt('2.3')">⬡ Copy grade prompt</button>
+      <div class="claude-prompt" id="grade-2.3">
+        <div class="prompt-label">Paste this into Claude Code</div>
+        Please grade my solution for exercise 2.3 from the Zig Allocators course. Read `ex2_3.zig`. Check:
+1. StringBuffer has `allocator`, `data`, and `len` (or equivalent) fields.
+2. `init` correctly initializes the struct.
+3. `append` uses `realloc` to grow the allocation and assigns the result back to `self.data`.
+4. `deinit` frees `self.data`.
+5. `zig run ex2_3.zig` compiles and prints "zig".
+Pay particular attention to whether realloc is used correctly (result assigned back).
+      </div>
+    </div>
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch2c')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Passing Allocators Around</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch3a')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Standard Allocators</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 3.1 — GPA
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch3a">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER III · SECTION 1</div>
+    <div class="chapter-title">GeneralPurposeAllocator</div>
+    <div class="chapter-intro">Your default allocator — safe, thorough, and full of debug features.</div>
+  </div>
+
+  <p>The <code>std.heap.GeneralPurposeAllocator</code> is the Swiss Army knife of Zig allocators. It's designed to be safe and informative in debug builds, and reasonably fast in release builds.</p>
+
+  <h3>Creating and using it</h3>
+<pre><code><span class="kw">var</span> gpa = std.heap.GeneralPurposeAllocator(.{}){};
+<span class="kw">defer</span> {
+    <span class="kw">const</span> leaked = gpa.deinit();
+    <span class="kw">if</span> (leaked == .leak) <span class="bi">@panic</span>(<span class="str">"memory leak detected!"</span>);
+}
+<span class="kw">const</span> allocator = gpa.allocator();</code></pre>
+
+  <p>The <code>gpa.deinit()</code> call at the end checks for leaks — all memory allocated via this GPA should have been freed before deinit. It returns a <code>Check</code> enum (<code>.ok</code> or <code>.leak</code>).</p>
+
+  <h3>Debug features</h3>
+  <p>In debug builds, GPA performs:</p>
+  <ul>
+    <li><strong>Leak detection</strong> — reports any allocations not freed by <code>deinit()</code></li>
+    <li><strong>Double-free detection</strong> — panics if you free the same memory twice</li>
+    <li><strong>Use-after-free detection</strong> — fills freed memory with a sentinel byte (<code>0xaa</code>), so reading freed memory gives obviously bad values</li>
+    <li><strong>Allocation metadata tracking</strong> — tracks the stack trace of every allocation for reporting</li>
+  </ul>
+
+  <h3>Configuration options</h3>
+  <p>The <code>(.{})</code> is a comptime config struct. You can customize behavior:</p>
+<pre><code><span class="kw">var</span> gpa = std.heap.GeneralPurposeAllocator(.{
+    .safety = <span class="kw">true</span>,           <span class="cmt">// enable safety checks (default in debug)</span>
+    .thread_safe = <span class="kw">false</span>,    <span class="cmt">// disable mutex if single-threaded</span>
+    .retain_metadata = <span class="kw">true</span>, <span class="cmt">// keep freed metadata for better diagnostics</span>
+}){};
+</code></pre>
+
+  <h3>When to use GPA</h3>
+  <ul>
+    <li>General-purpose heap allocation in applications</li>
+    <li>Any context where you want leak detection</li>
+    <li>Development and testing — the debug safety is invaluable</li>
+  </ul>
+
+  <div class="callout warn">
+    <div class="callout-title">GPA lives on the stack — be careful</div>
+    <code>var gpa = ...</code> puts the GPA struct on the <em>stack</em> of the current function. Don't let it go out of scope while allocations from it are still alive. In practice, put it at the top of <code>main()</code>.
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ex2')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Exercises — Chapter II</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch3b')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">ArenaAllocator</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 3.2 — ARENA
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch3b">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER III · SECTION 2</div>
+    <div class="chapter-title">ArenaAllocator</div>
+    <div class="chapter-intro">Allocate freely, free everything at once. The workhorse of request-scoped memory.</div>
+  </div>
+
+  <p>The <code>ArenaAllocator</code> is one of the most important allocators in practice. The idea is beautifully simple: <strong>individual frees do nothing; <code>arena.deinit()</code> frees everything at once</strong>.</p>
+
+  <div class="diagram">
+<pre>
+  Arena memory pool:
+  ┌────────────────────────────────────────────────┐
+  │  <span class="hi">alloc A (24B)</span> │ <span class="hi">alloc B (8B)</span> │ <span class="hi">alloc C (100B)</span> │ free ──▶
+  └────────────────────────────────────────────────┘
+                                        ↑
+                              bump pointer moves right
+                              
+  arena.deinit() ──▶ entire pool freed at once
+</pre>
+  </div>
+
+  <p>Internally, the arena keeps a linked list of large memory chunks. Each <code>alloc</code> just bumps a pointer forward — no bookkeeping per allocation. This makes allocation essentially free (a pointer increment).</p>
+
+  <h3>Setup and usage</h3>
+<pre><code><span class="kw">var</span> arena = std.heap.ArenaAllocator.init(gpa.allocator());
+<span class="kw">defer</span> arena.deinit();
+
+<span class="kw">const</span> allocator = arena.allocator();
+
+<span class="cmt">// Allocate freely — no need to free individually</span>
+<span class="kw">const</span> a = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">100</span>);
+<span class="kw">const</span> b = <span class="kw">try</span> allocator.create(Node);
+<span class="kw">const</span> c = <span class="kw">try</span> std.fmt.allocPrint(allocator, <span class="str">"hello {}"</span>, .{<span class="num">42</span>});
+
+<span class="cmt">// free(a), free(c), destroy(b) all do nothing for arenas</span>
+<span class="cmt">// arena.deinit() frees the underlying backing allocator chunks</span></code></pre>
+
+  <h3>The backing allocator</h3>
+  <p>An arena doesn't own raw memory — it wraps another allocator that it uses to request large chunks. You pass a <em>backing allocator</em> to <code>init()</code>. Typically this is your GPA:</p>
+<pre><code><span class="kw">var</span> gpa = std.heap.GeneralPurposeAllocator(.{}){};
+<span class="kw">defer</span> _ = gpa.deinit();
+
+<span class="kw">var</span> arena = std.heap.ArenaAllocator.init(gpa.allocator());
+<span class="kw">defer</span> arena.deinit();</code></pre>
+
+  <h3>When to use ArenaAllocator</h3>
+  <ul>
+    <li><strong>Request handling</strong> — web server handles a request, allocates many small things, frees it all when the response is sent</li>
+    <li><strong>Parsing</strong> — build a parse tree, use it, discard the whole thing</li>
+    <li><strong>Batch processing</strong> — process a batch of data, arena holds all intermediate state, deinit when batch is done</li>
+    <li><strong>Tests</strong> — use an arena in test setup, deinit at end</li>
+  </ul>
+
+  <h3>reset() — reuse without deallocation</h3>
+<pre><code><span class="cmt">// Process multiple requests reusing the same arena backing memory</span>
+<span class="kw">for</span> (requests) |req| {
+    <span class="kw">defer</span> _ = arena.reset(.retain_capacity);
+    <span class="kw">const</span> response = <span class="kw">try</span> handleRequest(arena.allocator(), req);
+    <span class="kw">try</span> sendResponse(response);
+}</code></pre>
+  <p><code>reset(.retain_capacity)</code> frees all objects but keeps the backing chunk allocated, so the next batch doesn't need to ask the OS for memory again. Very efficient for repeated fixed-ish workloads.</p>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch3a')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">GeneralPurposeAllocator</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch3c')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">FixedBufferAllocator</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 3.3 — FBA
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch3c">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER III · SECTION 3</div>
+    <div class="chapter-title">FixedBufferAllocator</div>
+    <div class="chapter-intro">Heap allocation from a stack buffer. No OS calls, no failures (until full).</div>
+  </div>
+
+  <p>The <code>FixedBufferAllocator</code> treats a fixed byte array as its memory pool. You hand it a <code>[]u8</code> buffer, and it parcels out pieces of it on demand. No OS interaction whatsoever.</p>
+
+<pre><code><span class="kw">var</span> buffer: [<span class="num">4096</span>]<span class="ty">u8</span> = <span class="bi">undefined</span>;
+<span class="kw">var</span> fba = std.heap.FixedBufferAllocator.init(&amp;buffer);
+<span class="kw">const</span> allocator = fba.allocator();
+
+<span class="kw">const</span> nums = <span class="kw">try</span> allocator.alloc(<span class="ty">u32</span>, <span class="num">10</span>); <span class="cmt">// carved from buffer</span>
+<span class="kw">const</span> s = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">100</span>);  <span class="cmt">// carved from buffer</span>
+<span class="cmt">// If you exceed 4096 bytes total: error.OutOfMemory</span></code></pre>
+
+  <h3>How it works internally</h3>
+  <div class="diagram">
+<pre>
+  buffer[0..4096]:
+  ┌──────────────────────────────────────────────────────┐
+  │ <span class="hi">nums (40B)</span>  │  <span class="hi2">s (100B)</span>  │  <span class="hi3">...(future)</span>  │  free space  │
+  └──────────────────────────────────────────────────────┘
+                              ↑
+                        end_index
+</pre>
+  </div>
+
+  <p>The FBA simply keeps an <code>end_index</code> into the buffer. Each allocation advances it. Free operations don't do anything (like an arena) — unless the freed allocation was the <em>last</em> one, in which case <code>end_index</code> moves back (it's a stack allocator at heart).</p>
+
+  <h3>When to use FixedBufferAllocator</h3>
+  <ul>
+    <li><strong>Embedded/no-heap contexts</strong> — microcontrollers with no dynamic memory</li>
+    <li><strong>No-failure paths</strong> — where you know your upper bound and can pre-allocate</li>
+    <li><strong>Performance-critical hot paths</strong> — zero OS involvement, often in L1 cache</li>
+    <li><strong>Stack-backed scratch space</strong> — allocate from the stack for small temporary work</li>
+  </ul>
+
+  <h3>Combining FBA with a fallback</h3>
+  <p>A common pattern: try the fixed buffer first, fall back to heap on overflow. Zig has <code>StackFallbackAllocator</code> for exactly this (next section).</p>
+
+  <div class="callout note">
+    <div class="callout-title">Buffer lifetime</div>
+    The buffer must outlive all allocations from the FBA. Since the buffer is usually stack-allocated (<code>var buffer: [N]u8</code>), this means the FBA should not outlive the function that owns the buffer.
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch3b')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">ArenaAllocator</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch3d')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">C Allocator &amp; Page Allocator</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 3.4 — C ALLOC & PAGE ALLOC
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch3d">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER III · SECTION 4</div>
+    <div class="chapter-title">C Allocator &amp; Page Allocator</div>
+    <div class="chapter-intro">The low-level primitives underlying most allocators.</div>
+  </div>
+
+  <h3>std.heap.c_allocator</h3>
+  <p>This is just a thin wrapper around C's <code>malloc</code>/<code>free</code>. It's available when linking libc.</p>
+
+<pre><code><span class="kw">const</span> allocator = std.heap.c_allocator;
+<span class="kw">const</span> buf = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">256</span>);
+<span class="kw">defer</span> allocator.free(buf);</code></pre>
+
+  <p>When to use it: when you're linking libc anyway and want maximum compatibility with C libraries that hand you <code>malloc</code>-allocated memory. Has no safety checks.</p>
+
+  <h3>std.heap.page_allocator</h3>
+  <p>Goes directly to the OS via <code>mmap</code>/<code>VirtualAlloc</code>. Allocates whole memory pages (typically 4096 bytes). No overhead, no bookkeeping — but every allocation is at least one page.</p>
+
+<pre><code><span class="kw">const</span> allocator = std.heap.page_allocator;
+<span class="kw">const</span> big_buf = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">1024</span> * <span class="num">1024</span>); <span class="cmt">// 1 MB</span>
+<span class="kw">defer</span> allocator.free(big_buf);</code></pre>
+
+  <p>When to use it: <strong>as a backing allocator for arenas or GPA</strong>, not for small allocations. Allocating a single <code>u32</code> wastes 4092 bytes of a page.</p>
+
+  <h3>The typical production stack</h3>
+<pre><code><span class="cmt">// page_allocator provides raw OS pages</span>
+<span class="cmt">// GPA manages sub-page allocations on top of that</span>
+<span class="cmt">// ArenaAllocator provides fast bump allocation backed by GPA</span>
+
+<span class="kw">var</span> gpa = std.heap.GeneralPurposeAllocator(.{}){};
+<span class="kw">defer</span> _ = gpa.deinit();  <span class="cmt">// GPA uses page_allocator internally by default</span>
+
+<span class="kw">var</span> arena = std.heap.ArenaAllocator.init(gpa.allocator());
+<span class="kw">defer</span> arena.deinit();</code></pre>
+
+  <table>
+    <tr><th>Allocator</th><th>Backed by</th><th>Min alloc size</th><th>Safety</th></tr>
+    <tr><td><code>page_allocator</code></td><td>OS (mmap)</td><td>4096 bytes</td><td>None</td></tr>
+    <tr><td><code>c_allocator</code></td><td>libc malloc</td><td>1 byte + overhead</td><td>None</td></tr>
+    <tr><td><code>GeneralPurposeAllocator</code></td><td>page_allocator</td><td>1 byte</td><td>Debug checks</td></tr>
+    <tr><td><code>ArenaAllocator</code></td><td>Any allocator</td><td>1 byte</td><td>None (fast)</td></tr>
+    <tr><td><code>FixedBufferAllocator</code></td><td>Stack/static buffer</td><td>1 byte</td><td>Bounds check</td></tr>
+  </table>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch3c')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">FixedBufferAllocator</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch3e')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">StackFallbackAllocator</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 3.5 — STACK FALLBACK
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch3e">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER III · SECTION 5</div>
+    <div class="chapter-title">StackFallbackAllocator</div>
+    <div class="chapter-intro">Try the stack buffer first; fall back to heap on overflow.</div>
+  </div>
+
+  <p><code>std.heap.stackFallback(N, fallback)</code> creates a combined allocator that tries a fixed <code>N</code>-byte stack buffer first, and only falls back to the given allocator when that runs out.</p>
+
+<pre><code><span class="kw">var</span> sfb = std.heap.stackFallback(<span class="num">1024</span>, gpa.allocator());
+<span class="kw">const</span> allocator = sfb.get();
+
+<span class="cmt">// Small allocation — served from the stack buffer, zero heap involvement</span>
+<span class="kw">const</span> small = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">100</span>);
+
+<span class="cmt">// Large allocation — overflows to GPA</span>
+<span class="kw">const</span> large = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">2000</span>);
+
+<span class="kw">defer</span> allocator.free(small);
+<span class="kw">defer</span> allocator.free(large);</code></pre>
+
+  <h3>Why this is powerful</h3>
+  <p>Many operations involve small amounts of data in the common case but occasionally need more. A path manipulation function, a small JSON serializer, a URL builder. With <code>StackFallbackAllocator</code>, the common case never touches the heap, making it fast and allocation-failure-resistant. Only the unusual large case pays the heap cost.</p>
+
+  <div class="callout tip">
+    <div class="callout-title">std.ArrayList uses this internally</div>
+    <code>std.ArrayListUnmanaged</code> starts with a small inline buffer and grows to the heap. The same pattern. Now you know how it works.
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch3d')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">C Allocator &amp; Page Allocator</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ex3')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Exercises — Chapter III</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     EXERCISES — CHAPTER III
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ex3">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER III · EXERCISES</div>
+    <div class="chapter-title">Standard Allocators</div>
+    <div class="chapter-intro">Use each allocator in a realistic scenario.</div>
+  </div>
+
+  <div class="exercise" id="exercise-3-1">
+    <div class="exercise-header">
+      <span class="exercise-badge">Exercise 3.1</span>
+      <span class="exercise-title">Arena for a parse tree</span>
+    </div>
+    <div class="exercise-body">
+      <div class="exercise-task">
+        <p>Create <code>ex3_1.zig</code>. Simulate a tiny expression parser using an ArenaAllocator. Define a tagged union <code>Expr</code> with variants <code>.num(i64)</code> and <code>.add(*Expr, *Expr)</code>. Build the tree <code>(1 + 2) + 3</code> using <code>allocator.create(Expr)</code>, evaluate it recursively, then call <code>arena.deinit()</code> to free everything at once (no individual frees).</p>
+        <ol>
+          <li>Define <code>const Expr = union(enum) { num: i64, add: struct { left: *Expr, right: *Expr } };</code></li>
+          <li>Use an ArenaAllocator backed by a GPA</li>
+          <li>Create nodes: num(1), num(2), add(num1, num2), num(3), add(add12, num3)</li>
+          <li>Write <code>fn eval(e: *Expr) i64</code> that recurses</li>
+          <li>Print result (should be 6), then arena.deinit()</li>
+        </ol>
+      </div>
+      <button class="grade-btn" onclick="copyGradePrompt('3.1')">⬡ Copy grade prompt</button>
+      <div class="claude-prompt" id="grade-3.1">
+        <div class="prompt-label">Paste this into Claude Code</div>
+        Grade my solution for exercise 3.1 from the Zig Allocators course. Read `ex3_1.zig`. Check:
+1. An ArenaAllocator is used (backed by a GPA or page_allocator).
+2. Expr is a tagged union with `.num` and `.add` (or equivalent) variants.
+3. Tree nodes are allocated with `allocator.create(Expr)`.
+4. There are NO individual `allocator.free()` or `allocator.destroy()` calls — cleanup is done solely via `arena.deinit()`.
+5. The `eval` function correctly recursively evaluates the tree.
+6. `zig run ex3_1.zig` prints 6.
+      </div>
+    </div>
+  </div>
+
+  <div class="exercise" id="exercise-3-2">
+    <div class="exercise-header">
+      <span class="exercise-badge">Exercise 3.2</span>
+      <span class="exercise-title">FixedBufferAllocator sizing</span>
+    </div>
+    <div class="exercise-body">
+      <div class="exercise-task">
+        <p>Create <code>ex3_2.zig</code>. Use a <code>FixedBufferAllocator</code> with a buffer of exactly <strong>64 bytes</strong>. Allocate as many <code>u8</code> bytes as possible in a loop (allocating 1 byte at a time), counting how many succeed before getting <code>error.OutOfMemory</code>. Print the count. Then explain in a comment why the number may be less than 64 (alignment/metadata overhead).</p>
+      </div>
+      <details class="exercise-hint">
+        <summary>HINT</summary>
+        <p>Use a <code>while (true)</code> loop and <code>allocator.alloc(u8, 1) catch break;</code>. Each <code>alloc</code> may consume slightly more than 1 byte due to alignment requirements.</p>
+      </details>
+      <button class="grade-btn" onclick="copyGradePrompt('3.2')">⬡ Copy grade prompt</button>
+      <div class="claude-prompt" id="grade-3.2">
+        <div class="prompt-label">Paste this into Claude Code</div>
+        Grade my solution for exercise 3.2 from the Zig Allocators course. Read `ex3_2.zig`. Check:
+1. A FixedBufferAllocator with a 64-byte buffer is used.
+2. A loop allocates until `error.OutOfMemory`, counting successes.
+3. The count is printed.
+4. There is a comment explaining why the count may be ≤ 64 (alignment, FBA overhead).
+5. `zig run ex3_2.zig` compiles and runs.
+Note the actual count and whether the explanation is accurate.
+      </div>
+    </div>
+  </div>
+
+  <div class="exercise" id="exercise-3-3">
+    <div class="exercise-header">
+      <span class="exercise-badge">Exercise 3.3</span>
+      <span class="exercise-title">Swapping allocators</span>
+    </div>
+    <div class="exercise-body">
+      <div class="exercise-task">
+        <p>Create <code>ex3_3.zig</code>. Write a function <code>fn buildWords(allocator: std.mem.Allocator) ![][]u8</code> that allocates an array of 5 strings (e.g. "alpha", "beta", "gamma", "delta", "epsilon") where each string is heap-allocated. In <code>main</code>, call it <strong>twice</strong>: once with a GPA allocator (freeing everything individually after), and once with an ArenaAllocator (freeing via <code>arena.deinit()</code>). The function should not change — only the allocator passed to it changes.</p>
+      </div>
+      <button class="grade-btn" onclick="copyGradePrompt('3.3')">⬡ Copy grade prompt</button>
+      <div class="claude-prompt" id="grade-3.3">
+        <div class="prompt-label">Paste this into Claude Code</div>
+        Grade my solution for exercise 3.3 from the Zig Allocators course. Read `ex3_3.zig`. Check:
+1. A `buildWords` function exists that takes `std.mem.Allocator` as first parameter.
+2. The function is called with both a GPA allocator and an ArenaAllocator.
+3. The function body itself is identical for both calls (same code path).
+4. When called with GPA: each string and the outer slice are freed individually.
+5. When called with ArenaAllocator: cleanup is via `arena.deinit()` only.
+6. Both calls compile and run correctly.
+This exercise specifically tests understanding that the same function works with any allocator.
+      </div>
+    </div>
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch3e')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">StackFallbackAllocator</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch4a')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Memory Safety</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 4.1 — LEAKS
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch4a">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER IV · SECTION 1</div>
+    <div class="chapter-title">Leaks &amp; GPA Detection</div>
+    <div class="chapter-intro">Forgetting to free — and how Zig catches it.</div>
+  </div>
+
+  <p>A <strong>memory leak</strong> occurs when you allocate memory but never free it. The allocation is no longer reachable (the pointer was lost) but the allocator still thinks it's in use. Over time, leaks cause programs to consume ever-increasing memory until the OS kills them.</p>
+
+  <h3>A classic leak</h3>
+<pre><code><span class="kw">pub fn</span> <span class="fn">main</span>() !<span class="ty">void</span> {
+    <span class="kw">var</span> gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    <span class="kw">defer</span> _ = gpa.deinit();
+    <span class="kw">const</span> allocator = gpa.allocator();
+
+    <span class="kw">const</span> buf = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">64</span>);
+    <span class="cmt">// LEAK: buf is never freed!</span>
+    _ = buf;
+}</code></pre>
+
+  <p>When you run this, GPA's <code>deinit()</code> will print something like:</p>
+<pre><code>error(gpa): memory address 0x... leaked:
+/path/to/file.zig:7:45: 0x... in main (file)
+    const buf = try allocator.alloc(u8, 64);</code></pre>
+
+  <p>It shows you exactly <em>where</em> the allocation was made — the full stack trace. This is why GPA is invaluable during development.</p>
+
+  <h3>Using defer to prevent leaks</h3>
+  <p>The idiomatic Zig pattern is to pair each allocation with a <code>defer</code> immediately:</p>
+<pre><code><span class="kw">const</span> buf = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">64</span>);
+<span class="kw">defer</span> allocator.free(buf);  <span class="cmt">// immediately after — never forget to add this</span>
+
+<span class="cmt">// ... use buf ...</span></code></pre>
+
+  <p>Writing <code>defer free</code> right after <code>alloc</code> ensures the free happens at the end of the current scope even if an error is returned partway through.</p>
+
+  <h3>Leak detection in tests</h3>
+<pre><code><span class="kw">test</span> <span class="str">"no leaks"</span> {
+    <span class="kw">const</span> allocator = std.testing.allocator;
+    <span class="cmt">// std.testing.allocator is a GPA that fails the test on leaks</span>
+    
+    <span class="kw">const</span> data = <span class="kw">try</span> allocator.alloc(<span class="ty">u32</span>, <span class="num">10</span>);
+    <span class="kw">defer</span> allocator.free(data);
+    
+    <span class="cmt">// If free is missing, the test fails with a leak report</span>
+}</code></pre>
+
+  <p><code>std.testing.allocator</code> is a GPA configured to fail tests on leaks. Always use it in tests — it makes memory bugs obvious immediately.</p>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ex3')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Exercises — Chapter III</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch4b')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Use-after-free</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 4.2 — USE AFTER FREE
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch4b">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER IV · SECTION 2</div>
+    <div class="chapter-title">Use-after-free</div>
+    <div class="chapter-intro">Reading memory you've already returned — undefined behavior with no guarantees.</div>
+  </div>
+
+  <p>A <strong>use-after-free</strong> happens when you hold a pointer to memory, free it, and then try to read or write through that pointer. The memory may have been reallocated to something else, zeroed, or left as garbage.</p>
+
+<pre><code><span class="kw">const</span> buf = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">8</span>);
+buf[<span class="num">0</span>] = <span class="num">42</span>;
+allocator.free(buf);
+
+<span class="cmt">// USE-AFTER-FREE — undefined behavior</span>
+std.debug.print(<span class="str">"val: {}\n"</span>, .{buf[<span class="num">0</span>]}); <span class="cmt">// could print 0xaa, crash, or 42 by luck</span></code></pre>
+
+  <h3>How GPA catches it</h3>
+  <p>In debug mode, GPA fills freed memory with the sentinel byte <code>0xaa</code>. If you read a freed buffer and see values like <code>170</code> (0xaa) or addresses like <code>0xaaaa...aaaa</code>, that's the UAF sentinel. GPA will also panic on double-free (next section) when it detects you're freeing memory that's already been marked freed.</p>
+
+  <h3>Why it's dangerous</h3>
+  <p>In release builds there are no checks. The memory may have been reused for a completely different allocation. You might:</p>
+  <ul>
+    <li>Silently corrupt data in an unrelated part of the program</li>
+    <li>Create a security vulnerability (use-after-free is a common exploit vector)</li>
+    <li>Get a segfault — or worse, get the wrong answer silently</li>
+  </ul>
+
+  <h3>Prevention patterns</h3>
+<pre><code><span class="cmt">// Pattern 1: null out the pointer after freeing (convention, not enforced)</span>
+allocator.free(buf);
+buf = <span class="bi">undefined</span>; <span class="cmt">// marks it as unusable — UB to read in debug mode</span>
+
+<span class="cmt">// Pattern 2: use defer so the free is the LAST thing that can happen</span>
+<span class="kw">const</span> buf = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">8</span>);
+<span class="kw">defer</span> allocator.free(buf);
+<span class="cmt">// Can't use buf after the deferred free because we're past the scope</span></code></pre>
+
+  <div class="callout danger">
+    <div class="callout-title">undefined is your friend here</div>
+    In Zig, assigning <code>undefined</code> to a variable doesn't zero it — in debug builds it fills with <code>0xaa</code>. Reading <code>undefined</code> memory is itself undefined behavior in safe builds, so Zig will panic if you try. This is intentionally useful for catching bugs.
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch4a')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Leaks &amp; GPA Detection</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch4c')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Double-free</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 4.3 — DOUBLE FREE
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch4c">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER IV · SECTION 3</div>
+    <div class="chapter-title">Double-free</div>
+    <div class="chapter-intro">Freeing the same allocation twice — corrupting the allocator's state.</div>
+  </div>
+
+  <p>A <strong>double-free</strong> is freeing the same pointer twice. This corrupts the allocator's internal bookkeeping, leading to bizarre bugs or crashes.</p>
+
+<pre><code><span class="kw">const</span> buf = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">64</span>);
+allocator.free(buf);
+allocator.free(buf); <span class="cmt">// DOUBLE-FREE — GPA panics in debug mode</span></code></pre>
+
+  <h3>A subtle source of double-frees</h3>
+  <p>Double-frees often appear in error handling paths or when ownership is unclear:</p>
+<pre><code><span class="kw">fn</span> <span class="fn">processData</span>(allocator: std.mem.Allocator) !<span class="ty">void</span> {
+    <span class="kw">const</span> buf = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">1024</span>);
+    <span class="kw">defer</span> allocator.free(buf);  <span class="cmt">// will free on both success AND error return</span>
+
+    <span class="kw">const</span> result = <span class="kw">try</span> transform(allocator, buf);
+    <span class="cmt">// if transform takes ownership and frees buf itself,</span>
+    <span class="cmt">// the defer above is a double-free!</span>
+}</code></pre>
+
+  <p>This is why clear ownership semantics matter — covered in Chapter V.</p>
+
+  <h3>What GPA does</h3>
+  <p>In debug mode, GPA tracks a "free list" of previously freed allocations. When you call <code>free</code>, it checks whether the address has already been freed. If so: panic with a clear message.</p>
+
+  <div class="callout tip">
+    <div class="callout-title">The rule of one owner</div>
+    Every allocation should have exactly one owner — the entity responsible for freeing it. Document this in function signatures and comments. "Caller owns the returned slice" is standard Zig documentation phrasing.
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch4b')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Use-after-free</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch4d')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Dangling Pointers</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 4.4 — DANGLING POINTERS
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch4d">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER IV · SECTION 4</div>
+    <div class="chapter-title">Dangling Pointers</div>
+    <div class="chapter-intro">Pointers that outlive what they point to.</div>
+  </div>
+
+  <p>A <strong>dangling pointer</strong> points to memory that is no longer valid — either freed heap memory (use-after-free) or stack memory that has gone out of scope.</p>
+
+  <h3>Returning a stack address — the classic bug</h3>
+<pre><code><span class="kw">fn</span> <span class="fn">getPtr</span>() *<span class="ty">u32</span> {
+    <span class="kw">var</span> x: <span class="ty">u32</span> = <span class="num">42</span>;
+    <span class="kw">return</span> &amp;x; <span class="cmt">// DANGLING — x dies when getPtr() returns</span>
+}
+
+<span class="kw">pub fn</span> <span class="fn">main</span>() <span class="ty">void</span> {
+    <span class="kw">const</span> p = getPtr();
+    <span class="cmt">// p points to memory on getPtr()'s stack frame, which is now gone</span>
+    std.debug.print(<span class="str">"val: {}\n"</span>, .{p.*}); <span class="cmt">// undefined behavior</span>
+}</code></pre>
+
+  <p>Zig does not prevent this at compile time (it's a hard problem in general). But in ReleaseSafe and Debug builds, Zig's safety checks may catch obvious violations.</p>
+
+  <h3>Slices into freed memory</h3>
+<pre><code><span class="kw">var</span> list = std.ArrayList(<span class="ty">u8</span>).init(allocator);
+<span class="kw">defer</span> list.deinit();
+
+<span class="kw">try</span> list.appendSlice(<span class="str">"hello"</span>);
+<span class="kw">const</span> slice = list.items; <span class="cmt">// points into ArrayList's internal buffer</span>
+
+<span class="kw">try</span> list.appendSlice(<span class="str">" world and more text that forces reallocation"</span>);
+<span class="cmt">// ArrayList may have reallocated its buffer! slice is now dangling.</span>
+std.debug.print(<span class="str">"{s}\n"</span>, .{slice}); <span class="cmt">// potential dangling pointer</span></code></pre>
+
+  <p>This is a subtle but common source of bugs when working with growing collections — if the collection reallocates, all existing slices into it become invalid.</p>
+
+  <h3>Safe alternatives</h3>
+  <ul>
+    <li>Store indices instead of pointers into collections</li>
+    <li>Do all operations, <em>then</em> take a slice reference</li>
+    <li>Use <code>list.ensureTotalCapacity(n)</code> to pre-allocate and prevent reallocation</li>
+  </ul>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch4c')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Double-free</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ex4')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Exercises — Chapter IV</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     EXERCISES — CHAPTER IV
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ex4">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER IV · EXERCISES</div>
+    <div class="chapter-title">Memory Safety</div>
+    <div class="chapter-intro">Find the bugs, then fix them.</div>
+  </div>
+
+  <div class="exercise" id="exercise-4-1">
+    <div class="exercise-header">
+      <span class="exercise-badge">Exercise 4.1</span>
+      <span class="exercise-title">Spot and fix the leak</span>
+    </div>
+    <div class="exercise-body">
+      <div class="exercise-task">
+        <p>Create <code>ex4_1.zig</code> with the following <em>intentionally buggy</em> code. Run it and observe the GPA leak report. Then fix the leak by adding the missing <code>defer</code>. Add a comment explaining what the leak was.</p>
+<pre><code><span class="kw">const</span> std = <span class="bi">@import</span>(<span class="str">"std"</span>);
+
+<span class="kw">fn</span> <span class="fn">makeBuffer</span>(allocator: std.mem.Allocator) ![]<span class="ty">u8</span> {
+    <span class="kw">return</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">256</span>);
+}
+
+<span class="kw">pub fn</span> <span class="fn">main</span>() !<span class="ty">void</span> {
+    <span class="kw">var</span> gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    <span class="kw">defer</span> {
+        <span class="kw">const</span> check = gpa.deinit();
+        <span class="kw">if</span> (check == .leak) std.debug.print(<span class="str">"LEAK DETECTED\n"</span>, .{});
+    }
+    <span class="kw">const</span> allocator = gpa.allocator();
+
+    <span class="kw">const</span> buf = <span class="kw">try</span> makeBuffer(allocator);
+    <span class="cmt">// BUG: buf is never freed</span>
+    buf[<span class="num">0</span>] = <span class="num">1</span>;
+    std.debug.print(<span class="str">"done\n"</span>, .{});
+}</code></pre>
+      </div>
+      <button class="grade-btn" onclick="copyGradePrompt('4.1')">⬡ Copy grade prompt</button>
+      <div class="claude-prompt" id="grade-4.1">
+        <div class="prompt-label">Paste this into Claude Code</div>
+        Grade my solution for exercise 4.1 from the Zig Allocators course. Read `ex4_1.zig`. Check:
+1. The leak is fixed — `allocator.free(buf)` is called, ideally via `defer`.
+2. A comment explains what the leak was and where.
+3. `zig run ex4_1.zig` prints "done" without any leak report.
+4. The GPA deinit check does not trigger the "LEAK DETECTED" print.
+      </div>
+    </div>
+  </div>
+
+  <div class="exercise" id="exercise-4-2">
+    <div class="exercise-header">
+      <span class="exercise-badge">Exercise 4.2</span>
+      <span class="exercise-title">Write a leak-free test</span>
+    </div>
+    <div class="exercise-body">
+      <div class="exercise-task">
+        <p>Create <code>ex4_2.zig</code>. Write a <code>test "buildList is leak-free"</code> block that uses <code>std.testing.allocator</code> to call a function <code>buildList</code> which allocates a 5-element <code>[]i32</code> filled with values 1–5. The test must properly free the returned slice. If you remove the free, the test should fail.</p>
+        <ol>
+          <li>Write <code>fn buildList(allocator: std.mem.Allocator) ![]i32</code></li>
+          <li>In the test, use <code>std.testing.allocator</code></li>
+          <li>Assert that <code>result[4] == 5</code></li>
+          <li>Free the result</li>
+        </ol>
+      </div>
+      <button class="grade-btn" onclick="copyGradePrompt('4.2')">⬡ Copy grade prompt</button>
+      <div class="claude-prompt" id="grade-4.2">
+        <div class="prompt-label">Paste this into Claude Code</div>
+        Grade my solution for exercise 4.2 from the Zig Allocators course. Read `ex4_2.zig`. Check:
+1. A `buildList` function exists that allocates `[]i32` of length 5.
+2. The test uses `std.testing.allocator`.
+3. The returned slice is freed in the test (ideally with defer).
+4. There's an assertion checking one of the values.
+5. `zig test ex4_2.zig` passes cleanly.
+Bonus: temporarily comment out the free and verify the test fails with a leak error.
+      </div>
+    </div>
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch4d')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Dangling Pointers</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch5a')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Ownership Patterns</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 5 — OWNERSHIP
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch5a">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER V · SECTION 1</div>
+    <div class="chapter-title">Who Owns the Allocation?</div>
+    <div class="chapter-intro">Ownership is a contract. Zig doesn't enforce it — you document and honor it.</div>
+  </div>
+
+  <p>Every heap allocation has an <strong>owner</strong> — an entity responsible for eventually calling <code>free</code>. In Zig, unlike Rust, ownership is not enforced by the compiler. It's a convention you express through documentation and code structure.</p>
+
+  <h3>Three ownership models</h3>
+
+  <h3>1. Caller allocates, caller frees (most common)</h3>
+<pre><code><span class="cmt">/// Fills buf with data. Caller is responsible for providing</span>
+<span class="cmt">/// and managing buf.</span>
+<span class="kw">fn</span> <span class="fn">fillBuffer</span>(buf: []<span class="ty">u8</span>) <span class="ty">void</span> {
+    <span class="bi">@memset</span>(buf, <span class="num">0xAB</span>);
+}</code></pre>
+
+  <h3>2. Callee allocates, caller frees (documented)</h3>
+<pre><code><span class="cmt">/// Returns a newly allocated string. Caller owns the result</span>
+<span class="cmt">/// and must free it with the same allocator.</span>
+<span class="kw">fn</span> <span class="fn">buildString</span>(allocator: std.mem.Allocator) ![]<span class="ty">u8</span> {
+    <span class="kw">return</span> allocator.dupe(<span class="ty">u8</span>, <span class="str">"hello"</span>);
+}
+
+<span class="cmt">// usage:</span>
+<span class="kw">const</span> s = <span class="kw">try</span> buildString(allocator);
+<span class="kw">defer</span> allocator.free(s); <span class="cmt">// caller's responsibility</span></code></pre>
+
+  <h3>3. Struct takes ownership (stored internally)</h3>
+<pre><code><span class="cmt">/// Takes ownership of `data`. Do not free `data` yourself after</span>
+<span class="cmt">/// passing it here — Buffer.deinit() will free it.</span>
+<span class="kw">fn</span> <span class="fn">Buffer.fromOwnedSlice</span>(allocator: std.mem.Allocator, data: []<span class="ty">u8</span>) Buffer {
+    <span class="kw">return</span> .{ .allocator = allocator, .data = data };
+}</code></pre>
+
+  <h3>Documenting ownership in Zig</h3>
+  <p>The Zig stdlib uses consistent phrasing — you should too:</p>
+  <ul>
+    <li>"Caller owns the returned memory" — function allocates, caller frees</li>
+    <li>"Takes ownership of X" — struct/function will free X; caller must not</li>
+    <li>"Borrows X" — function uses X but doesn't free it</li>
+  </ul>
+
+  <div class="callout warn">
+    <div class="callout-title">When ownership is unclear, bugs appear</div>
+    Most double-frees and leaks in Zig code come from ambiguous ownership. If you can't immediately say "this allocation is freed by X," that's a design smell.
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ex4')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Exercises — Chapter IV</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch5b')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">init/deinit Pattern</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 5.2 — INIT/DEINIT
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch5b">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER V · SECTION 2</div>
+    <div class="chapter-title">init / deinit Pattern</div>
+    <div class="chapter-intro">The idiomatic Zig lifecycle for structs that own memory.</div>
+  </div>
+
+  <p>In Zig, the conventional way to handle a struct that needs to allocate is the <code>init</code>/<code>deinit</code> pattern. It's analogous to constructors/destructors but explicit.</p>
+
+<pre><code><span class="kw">const</span> Cache = <span class="kw">struct</span> {
+    allocator: std.mem.Allocator,
+    entries: std.StringHashMap([]<span class="kw">const</span> <span class="ty">u8</span>),
+
+    <span class="cmt">/// Create a new Cache. Caller must call deinit() when done.</span>
+    <span class="kw">pub fn</span> <span class="fn">init</span>(allocator: std.mem.Allocator) Cache {
+        <span class="kw">return</span> .{
+            .allocator = allocator,
+            .entries = std.StringHashMap([]<span class="kw">const</span> <span class="ty">u8</span>).init(allocator),
+        };
+    }
+
+    <span class="cmt">/// Free all resources owned by this Cache.</span>
+    <span class="kw">pub fn</span> <span class="fn">deinit</span>(self: *Cache) <span class="ty">void</span> {
+        <span class="cmt">// Free all values in the map</span>
+        <span class="kw">var</span> it = self.entries.valueIterator();
+        <span class="kw">while</span> (it.next()) |v| self.allocator.free(v.*);
+        self.entries.deinit();
+    }
+
+    <span class="kw">pub fn</span> <span class="fn">put</span>(self: *Cache, key: []<span class="kw">const</span> <span class="ty">u8</span>, value: []<span class="kw">const</span> <span class="ty">u8</span>) !<span class="ty">void</span> {
+        <span class="kw">const</span> owned_value = <span class="kw">try</span> self.allocator.dupe(<span class="ty">u8</span>, value);
+        <span class="kw">try</span> self.entries.put(key, owned_value);
+    }
+};
+
+<span class="cmt">// Usage</span>
+<span class="kw">var</span> cache = Cache.init(allocator);
+<span class="kw">defer</span> cache.deinit();
+
+<span class="kw">try</span> cache.put(<span class="str">"key"</span>, <span class="str">"value"</span>);</code></pre>
+
+  <h3>Key rules of init/deinit</h3>
+  <ul>
+    <li><code>init</code> takes an allocator (if needed), returns the struct by value</li>
+    <li><code>deinit</code> takes <code>self: *MyStruct</code> (a pointer, so it can mutate) and frees everything</li>
+    <li>The caller immediately follows <code>init</code> with <code>defer deinit()</code></li>
+    <li><code>deinit</code> may be called on zero-initialized or partially-initialized structs (be defensive)</li>
+  </ul>
+
+  <div class="callout note">
+    <div class="callout-title">You've seen this in the stdlib</div>
+    <code>std.ArrayList.init(allocator)</code> / <code>list.deinit()</code>. <code>std.StringHashMap.init(allocator)</code> / <code>map.deinit()</code>. Now you know exactly what they're doing — and you can build your own types that follow the same contract.
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch5a')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Who Owns the Allocation?</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch5c')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Returning Allocated Memory</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 5.3 — RETURNING ALLOCATIONS
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch5c">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER V · SECTION 3</div>
+    <div class="chapter-title">Returning Allocated Memory</div>
+    <div class="chapter-intro">Transferring ownership through return values.</div>
+  </div>
+
+  <p>Sometimes a function's job is to produce a newly allocated value. Ownership transfers to the caller. This is fine — as long as it's documented.</p>
+
+  <h3>The error path problem</h3>
+  <p>When a function allocates multiple things and one fails, you must clean up the successful allocations:</p>
+
+<pre><code><span class="kw">fn</span> <span class="fn">buildPair</span>(allocator: std.mem.Allocator) !struct { a: []<span class="ty">u8</span>, b: []<span class="ty">u8</span> } {
+    <span class="kw">const</span> a = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">64</span>);
+    <span class="cmt">// If the next line fails, 'a' leaks!</span>
+    <span class="kw">const</span> b = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">64</span>);
+    <span class="kw">return</span> .{ .a = a, .b = b };
+}</code></pre>
+
+  <p>Fix: use errdefer on earlier allocations:</p>
+
+<pre><code><span class="kw">fn</span> <span class="fn">buildPair</span>(allocator: std.mem.Allocator) !struct { a: []<span class="ty">u8</span>, b: []<span class="ty">u8</span> } {
+    <span class="kw">const</span> a = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">64</span>);
+    <span class="kw">errdefer</span> allocator.free(a); <span class="cmt">// free 'a' if we return an error</span>
+
+    <span class="kw">const</span> b = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">64</span>);
+    <span class="cmt">// If we reach here, both succeeded</span>
+    <span class="kw">return</span> .{ .a = a, .b = b };
+    <span class="cmt">// errdefer for 'a' does NOT run on success — that's the point</span>
+}</code></pre>
+
+  <h3>errdefer — the essential tool</h3>
+  <p><code>errdefer</code> is like <code>defer</code> but it only runs when the function returns an error. On a successful return, errdefer is skipped. This makes it perfect for cleanup in the "something went wrong partway" path.</p>
+
+<pre><code><span class="kw">fn</span> <span class="fn">complexInit</span>(allocator: std.mem.Allocator) !MyStruct {
+    <span class="kw">var</span> result = MyStruct{};
+
+    result.buf_a = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">100</span>);
+    <span class="kw">errdefer</span> allocator.free(result.buf_a);
+
+    result.buf_b = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">200</span>);
+    <span class="kw">errdefer</span> allocator.free(result.buf_b);
+
+    result.map = std.StringHashMap(<span class="ty">u32</span>).init(allocator);
+    <span class="kw">errdefer</span> result.map.deinit();
+
+    <span class="cmt">// ... more setup that might fail ...</span>
+
+    <span class="kw">return</span> result; <span class="cmt">// all errdefers skipped — caller owns result</span>
+}</code></pre>
+
+  <div class="callout tip">
+    <div class="callout-title">The errdefer pattern is mandatory for multi-allocation functions</div>
+    Every time you have two or more allocations in a function that returns the allocated memory to the caller, you need errdefer on all but the last allocation. This is one of the most important patterns in safe Zig.
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch5b')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">init/deinit Pattern</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch5d')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Allocators in Structs</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 5.4 — ALLOCATORS IN STRUCTS
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch5d">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER V · SECTION 4</div>
+    <div class="chapter-title">Allocators in Structs</div>
+    <div class="chapter-intro">Storing the allocator so the struct can manage its own memory.</div>
+  </div>
+
+  <p>When a struct needs to allocate and deallocate memory throughout its lifetime (not just at init), it stores the allocator as a field. This is the pattern used by <code>ArrayList</code>, <code>HashMap</code>, and virtually every stdlib container.</p>
+
+<pre><code><span class="kw">const</span> GrowableBuffer = <span class="kw">struct</span> {
+    allocator: std.mem.Allocator,
+    data: []<span class="ty">u8</span>,
+    len: <span class="ty">usize</span>,
+
+    <span class="kw">pub fn</span> <span class="fn">init</span>(allocator: std.mem.Allocator) GrowableBuffer {
+        <span class="kw">return</span> .{
+            .allocator = allocator,
+            .data = &amp;[<span class="num">0</span>]<span class="ty">u8</span>{},
+            .len = <span class="num">0</span>,
+        };
+    }
+
+    <span class="kw">pub fn</span> <span class="fn">deinit</span>(self: *GrowableBuffer) <span class="ty">void</span> {
+        <span class="kw">if</span> (self.data.len > <span class="num">0</span>)
+            self.allocator.free(self.data);
+    }
+
+    <span class="kw">pub fn</span> <span class="fn">append</span>(self: *GrowableBuffer, byte: <span class="ty">u8</span>) !<span class="ty">void</span> {
+        <span class="kw">if</span> (self.len == self.data.len) {
+            <span class="kw">const</span> new_cap = <span class="kw">if</span> (self.data.len == <span class="num">0</span>) <span class="num">8</span> <span class="kw">else</span> self.data.len * <span class="num">2</span>;
+            self.data = <span class="kw">try</span> self.allocator.realloc(self.data, new_cap);
+        }
+        self.data[self.len] = byte;
+        self.len += <span class="num">1</span>;
+    }
+
+    <span class="kw">pub fn</span> <span class="fn">slice</span>(self: GrowableBuffer) []<span class="ty">u8</span> {
+        <span class="kw">return</span> self.data[<span class="num">0</span>..self.len];
+    }
+};</code></pre>
+
+  <h3>Why store the allocator, not pass it everywhere?</h3>
+  <p>Methods like <code>append</code> may allocate. If the allocator weren't stored, every single method call would need the allocator as a parameter — verbose and error-prone. Storing it once in <code>init</code> keeps the API clean.</p>
+
+  <h3>Never store a concrete allocator type</h3>
+<pre><code><span class="cmt">// WRONG — couples the struct to a specific allocator implementation</span>
+<span class="kw">const</span> BadStruct = <span class="kw">struct</span> {
+    gpa: *std.heap.GeneralPurposeAllocator(.{}),
+};
+
+<span class="cmt">// CORRECT — works with any allocator</span>
+<span class="kw">const</span> GoodStruct = <span class="kw">struct</span> {
+    allocator: std.mem.Allocator,
+};</code></pre>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch5c')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Returning Allocated Memory</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ex5')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Exercises — Chapter V</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     EXERCISES — CHAPTER V
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ex5">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER V · EXERCISES</div>
+    <div class="chapter-title">Ownership Patterns</div>
+    <div class="chapter-intro">Build real data structures with correct ownership semantics.</div>
+  </div>
+
+  <div class="exercise" id="exercise-5-1">
+    <div class="exercise-header">
+      <span class="exercise-badge">Exercise 5.1</span>
+      <span class="exercise-title">A proper Stack(T)</span>
+    </div>
+    <div class="exercise-body">
+      <div class="exercise-task">
+        <p>Create <code>ex5_1.zig</code>. Implement a generic <code>Stack(T)</code> struct with:</p>
+        <ol>
+          <li><code>init(allocator)</code> — starts empty</li>
+          <li><code>deinit(self: *Stack(T))</code> — frees all memory</li>
+          <li><code>push(self, value: T) !void</code> — allocates a new node</li>
+          <li><code>pop(self) ?T</code> — returns and frees the top node, or null if empty</li>
+          <li>Test it in main: push 1, 2, 3, then pop all and print them (should print 3, 2, 1)</li>
+        </ol>
+        <p>Use a singly-linked list internally (<code>create</code>/<code>destroy</code> per node).</p>
+      </div>
+      <button class="grade-btn" onclick="copyGradePrompt('5.1')">⬡ Copy grade prompt</button>
+      <div class="claude-prompt" id="grade-5.1">
+        <div class="prompt-label">Paste this into Claude Code</div>
+        Grade my solution for exercise 5.1 from the Zig Allocators course. Read `ex5_1.zig`. Check:
+1. Stack(T) is a generic type (comptime T parameter).
+2. init/deinit are implemented correctly.
+3. push uses `allocator.create()` for each node.
+4. pop uses `allocator.destroy()` on the popped node and returns the value.
+5. deinit cleans up any remaining nodes (frees the whole list).
+6. `zig run ex5_1.zig` prints 3, 2, 1 (LIFO order).
+7. No memory leaks (test with std.testing.allocator if a test block is present, or check deinit logic manually).
+      </div>
+    </div>
+  </div>
+
+  <div class="exercise" id="exercise-5-2">
+    <div class="exercise-header">
+      <span class="exercise-badge">Exercise 5.2</span>
+      <span class="exercise-title">errdefer in a multi-allocation init</span>
+    </div>
+    <div class="exercise-body">
+      <div class="exercise-task">
+        <p>Create <code>ex5_2.zig</code>. Implement a <code>Config</code> struct that holds two allocated strings: <code>host: []u8</code> and <code>path: []u8</code>. Write <code>Config.init(allocator, host, path)</code> using <code>errdefer</code> correctly so that if the second <code>dupe</code> fails, the first allocation is cleaned up. Then write a test that verifies no leak occurs on either success or simulated failure.</p>
+        <p>For the failure test, use <code>std.testing.failing_allocator</code> which fails on the Nth allocation — set it to fail on the 2nd allocation to simulate the second dupe failing.</p>
+      </div>
+      <details class="exercise-hint">
+        <summary>HINT</summary>
+        <p><code>std.testing.FailingAllocator.init(backing_allocator, .{ .fail_index = 1 })</code> fails on the 2nd allocation (index 1). Use <code>failing.allocator()</code> as the allocator.</p>
+      </details>
+      <button class="grade-btn" onclick="copyGradePrompt('5.2')">⬡ Copy grade prompt</button>
+      <div class="claude-prompt" id="grade-5.2">
+        <div class="prompt-label">Paste this into Claude Code</div>
+        Grade my solution for exercise 5.2 from the Zig Allocators course. Read `ex5_2.zig`. Check:
+1. Config.init allocates both `host` and `path` using `dupe`.
+2. `errdefer allocator.free(host_copy)` is placed after the first dupe and before the second.
+3. A test exists for the success path (no leak).
+4. A test exists for the failure path using FailingAllocator that verifies the first allocation is cleaned up.
+5. `zig test ex5_2.zig` passes with no leaks reported.
+      </div>
+    </div>
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch5d')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Allocators in Structs</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch6a')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Building Allocators</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 6.1 — VTABLE
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch6a">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER VI · SECTION 1</div>
+    <div class="chapter-title">The Allocator VTable</div>
+    <div class="chapter-intro">How the interface works under the hood — and how to plug into it.</div>
+  </div>
+
+  <p>To build your own allocator, you need to understand how <code>std.mem.Allocator</code> achieves runtime polymorphism. The answer is a classic vtable — a struct of function pointers.</p>
+
+<pre><code><span class="cmt">// Simplified view of std.mem.Allocator (actual stdlib source)</span>
+<span class="kw">pub const</span> Allocator = <span class="kw">struct</span> {
+    ptr: *<span class="kw">anyopaque</span>,        <span class="cmt">// pointer to the concrete allocator</span>
+    vtable: *<span class="kw">const</span> VTable,  <span class="cmt">// function dispatch table</span>
+
+    <span class="kw">pub const</span> VTable = <span class="kw">struct</span> {
+        alloc:  *<span class="kw">const fn</span>(ctx: *<span class="kw">anyopaque</span>, len: <span class="ty">usize</span>, ptr_align: <span class="ty">u8</span>,
+                           ret_addr: <span class="ty">usize</span>) ?[*]<span class="ty">u8</span>,
+        resize: *<span class="kw">const fn</span>(ctx: *<span class="kw">anyopaque</span>, buf: []<span class="ty">u8</span>, buf_align: <span class="ty">u8</span>,
+                           new_len: <span class="ty">usize</span>, ret_addr: <span class="ty">usize</span>) <span class="ty">bool</span>,
+        free:   *<span class="kw">const fn</span>(ctx: *<span class="kw">anyopaque</span>, buf: []<span class="ty">u8</span>, buf_align: <span class="ty">u8</span>,
+                           ret_addr: <span class="ty">usize</span>) <span class="ty">void</span>,
+    };
+};</code></pre>
+
+  <p>When you call <code>allocator.alloc(u8, 100)</code>, the method call goes through <code>vtable.alloc</code>, passing <code>ptr</code> as the context. Each concrete allocator provides its own implementations of these three functions.</p>
+
+  <h3>The allocator() method pattern</h3>
+  <p>Each concrete allocator type has an <code>allocator()</code> method that packages <code>self</code> and its vtable into a <code>std.mem.Allocator</code>:</p>
+
+<pre><code><span class="kw">pub fn</span> <span class="fn">allocator</span>(self: *MyAllocator) std.mem.Allocator {
+    <span class="kw">return</span> .{
+        .ptr = self,
+        .vtable = &amp;.{
+            .alloc  = myAlloc,
+            .resize = myResize,
+            .free   = myFree,
+        },
+    };
+}
+
+<span class="kw">fn</span> <span class="fn">myAlloc</span>(ctx: *<span class="kw">anyopaque</span>, len: <span class="ty">usize</span>, ptr_align: <span class="ty">u8</span>, ret_addr: <span class="ty">usize</span>) ?[*]<span class="ty">u8</span> {
+    <span class="kw">const</span> self: *MyAllocator = <span class="bi">@ptrCast</span>(<span class="bi">@alignCast</span>(ctx));
+    <span class="cmt">// ... implementation ...</span>
+}</code></pre>
+
+  <p>The <code>@ptrCast(@alignCast(ctx))</code> recovers the typed pointer from the <code>*anyopaque</code>. The vtable is a comptime constant — it's placed in the binary's read-only data segment.</p>
+
+  <div class="callout note">
+    <div class="callout-title">This pattern is used throughout Zig</div>
+    <code>std.io.Reader</code>, <code>std.io.Writer</code>, <code>std.io.SeekableStream</code> all use the same vtable pattern. Understand it once, and you understand Zig's runtime polymorphism system completely.
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ex5')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Exercises — Chapter V</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch6b')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">A Counting Allocator</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 6.2 — COUNTING ALLOCATOR
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch6b">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER VI · SECTION 2</div>
+    <div class="chapter-title">A Counting Allocator</div>
+    <div class="chapter-intro">Wrap any allocator to track total bytes allocated.</div>
+  </div>
+
+  <p>A <strong>counting allocator</strong> wraps another allocator (the "backing" allocator) and tracks how many bytes have been allocated and freed. Every real allocation is delegated to the backing allocator — the wrapper just observes and counts.</p>
+
+<pre><code><span class="kw">const</span> CountingAllocator = <span class="kw">struct</span> {
+    backing: std.mem.Allocator,
+    total_allocated: <span class="ty">usize</span> = <span class="num">0</span>,
+    total_freed: <span class="ty">usize</span> = <span class="num">0</span>,
+
+    <span class="kw">pub fn</span> <span class="fn">init</span>(backing: std.mem.Allocator) CountingAllocator {
+        <span class="kw">return</span> .{ .backing = backing };
+    }
+
+    <span class="kw">pub fn</span> <span class="fn">allocator</span>(self: *CountingAllocator) std.mem.Allocator {
+        <span class="kw">return</span> .{
+            .ptr = self,
+            .vtable = &amp;.{
+                .alloc  = alloc,
+                .resize = resize,
+                .free   = free,
+            },
+        };
+    }
+
+    <span class="kw">fn</span> <span class="fn">alloc</span>(ctx: *<span class="kw">anyopaque</span>, len: <span class="ty">usize</span>, ptr_align: <span class="ty">u8</span>, ret_addr: <span class="ty">usize</span>) ?[*]<span class="ty">u8</span> {
+        <span class="kw">const</span> self: *CountingAllocator = <span class="bi">@ptrCast</span>(<span class="bi">@alignCast</span>(ctx));
+        <span class="kw">const</span> result = self.backing.vtable.alloc(self.backing.ptr, len, ptr_align, ret_addr);
+        <span class="kw">if</span> (result != <span class="kw">null</span>) self.total_allocated += len;
+        <span class="kw">return</span> result;
+    }
+
+    <span class="kw">fn</span> <span class="fn">resize</span>(ctx: *<span class="kw">anyopaque</span>, buf: []<span class="ty">u8</span>, buf_align: <span class="ty">u8</span>, new_len: <span class="ty">usize</span>, ret_addr: <span class="ty">usize</span>) <span class="ty">bool</span> {
+        <span class="kw">const</span> self: *CountingAllocator = <span class="bi">@ptrCast</span>(<span class="bi">@alignCast</span>(ctx));
+        <span class="kw">return</span> self.backing.vtable.resize(self.backing.ptr, buf, buf_align, new_len, ret_addr);
+    }
+
+    <span class="kw">fn</span> <span class="fn">free</span>(ctx: *<span class="kw">anyopaque</span>, buf: []<span class="ty">u8</span>, buf_align: <span class="ty">u8</span>, ret_addr: <span class="ty">usize</span>) <span class="ty">void</span> {
+        <span class="kw">const</span> self: *CountingAllocator = <span class="bi">@ptrCast</span>(<span class="bi">@alignCast</span>(ctx));
+        self.total_freed += buf.len;
+        self.backing.vtable.free(self.backing.ptr, buf, buf_align, ret_addr);
+    }
+
+    <span class="kw">pub fn</span> <span class="fn">currentUsage</span>(self: CountingAllocator) <span class="ty">usize</span> {
+        <span class="kw">return</span> self.total_allocated - self.total_freed;
+    }
+};</code></pre>
+
+  <h3>Usage</h3>
+<pre><code><span class="kw">var</span> counter = CountingAllocator.init(gpa.allocator());
+<span class="kw">const</span> allocator = counter.allocator();
+
+<span class="kw">const</span> buf = <span class="kw">try</span> allocator.alloc(<span class="ty">u8</span>, <span class="num">100</span>);
+std.debug.print(<span class="str">"using {} bytes\n"</span>, .{counter.currentUsage()}); <span class="cmt">// 100</span>
+allocator.free(buf);
+std.debug.print(<span class="str">"using {} bytes\n"</span>, .{counter.currentUsage()}); <span class="cmt">// 0</span></code></pre>
+
+  <p>This pattern — wrapping an allocator to add behavior — is one of the most powerful tools in Zig. You can add logging, limits, profiling, or any behavior you want, with zero changes to your existing code.</p>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch6a')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">The VTable</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch6c')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">A Logging Allocator</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 6.3 — LOGGING ALLOCATOR
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch6c">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER VI · SECTION 3</div>
+    <div class="chapter-title">A Logging Allocator</div>
+    <div class="chapter-intro">Print every allocation and free — useful for debugging allocation patterns.</div>
+  </div>
+
+  <p>Building on the counting allocator pattern, a logging allocator prints each allocation and free to stderr. Zig actually ships one: <code>std.heap.LoggingAllocator</code>. But building it yourself cements the vtable pattern.</p>
+
+<pre><code><span class="kw">const</span> LoggingAllocator = <span class="kw">struct</span> {
+    backing: std.mem.Allocator,
+
+    <span class="kw">pub fn</span> <span class="fn">allocator</span>(self: *LoggingAllocator) std.mem.Allocator {
+        <span class="kw">return</span> .{ .ptr = self, .vtable = &amp;.{
+            .alloc = alloc, .resize = resize, .free = free,
+        }};
+    }
+
+    <span class="kw">fn</span> <span class="fn">alloc</span>(ctx: *<span class="kw">anyopaque</span>, len: <span class="ty">usize</span>, ptr_align: <span class="ty">u8</span>, ret_addr: <span class="ty">usize</span>) ?[*]<span class="ty">u8</span> {
+        <span class="kw">const</span> self: *LoggingAllocator = <span class="bi">@ptrCast</span>(<span class="bi">@alignCast</span>(ctx));
+        <span class="kw">const</span> result = self.backing.vtable.alloc(self.backing.ptr, len, ptr_align, ret_addr);
+        <span class="kw">if</span> (result) |ptr| {
+            std.debug.print(<span class="str">"[alloc] {} bytes at 0x{x}\n"</span>, .{len, <span class="bi">@intFromPtr</span>(ptr)});
+        } <span class="kw">else</span> {
+            std.debug.print(<span class="str">"[alloc] FAILED {} bytes\n"</span>, .{len});
+        }
+        <span class="kw">return</span> result;
+    }
+
+    <span class="kw">fn</span> <span class="fn">resize</span>(ctx: *<span class="kw">anyopaque</span>, buf: []<span class="ty">u8</span>, buf_align: <span class="ty">u8</span>, new_len: <span class="ty">usize</span>, ret_addr: <span class="ty">usize</span>) <span class="ty">bool</span> {
+        <span class="kw">const</span> self: *LoggingAllocator = <span class="bi">@ptrCast</span>(<span class="bi">@alignCast</span>(ctx));
+        <span class="kw">const</span> ok = self.backing.vtable.resize(self.backing.ptr, buf, buf_align, new_len, ret_addr);
+        std.debug.print(<span class="str">"[resize] 0x{x}: {} -> {} ({})\n"</span>,
+            .{<span class="bi">@intFromPtr</span>(buf.ptr), buf.len, new_len, <span class="kw">if</span> (ok) <span class="str">"ok"</span> <span class="kw">else</span> <span class="str">"fail"</span>});
+        <span class="kw">return</span> ok;
+    }
+
+    <span class="kw">fn</span> <span class="fn">free</span>(ctx: *<span class="kw">anyopaque</span>, buf: []<span class="ty">u8</span>, buf_align: <span class="ty">u8</span>, ret_addr: <span class="ty">usize</span>) <span class="ty">void</span> {
+        <span class="kw">const</span> self: *LoggingAllocator = <span class="bi">@ptrCast</span>(<span class="bi">@alignCast</span>(ctx));
+        std.debug.print(<span class="str">"[free]  {} bytes at 0x{x}\n"</span>, .{buf.len, <span class="bi">@intFromPtr</span>(buf.ptr)});
+        self.backing.vtable.free(self.backing.ptr, buf, buf_align, ret_addr);
+    }
+};</code></pre>
+
+  <h3>Chaining allocators</h3>
+  <p>You can chain these wrappers:</p>
+<pre><code><span class="cmt">// page_allocator → GPA (sub-page management) → Logger → Counter → your code</span>
+<span class="kw">var</span> gpa = std.heap.GeneralPurposeAllocator(.{}){};
+<span class="kw">var</span> logger = LoggingAllocator{ .backing = gpa.allocator() };
+<span class="kw">var</span> counter = CountingAllocator.init(logger.allocator());
+<span class="kw">const</span> allocator = counter.allocator();</code></pre>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch6b')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">A Counting Allocator</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ch6d')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">A Pool Allocator</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     CHAPTER 6.4 — POOL ALLOCATOR
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ch6d">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER VI · SECTION 4</div>
+    <div class="chapter-title">A Pool Allocator</div>
+    <div class="chapter-intro">Fixed-size allocations at maximum speed — the foundation of game engines and servers.</div>
+  </div>
+
+  <p>A <strong>pool allocator</strong> is specialized for allocating many objects of the same size. Instead of general heap management overhead per object, it pre-allocates a large block and maintains a free list of same-sized slots. Alloc and free are O(1) with zero fragmentation.</p>
+
+  <div class="diagram">
+<pre>
+  Pool: 8 slots of sizeof(Node)
+  ┌────┬────┬────┬────┬────┬────┬────┬────┐
+  │<span class="hi"> A  </span>│<span class="hi2"> B  </span>│ -- │<span class="hi"> C  </span>│ -- │ -- │<span class="hi2"> D  </span>│ -- │
+  └────┴────┴────┴────┴────┴────┴────┴────┘
+  used: A,B,C,D    free list: slots 2,4,5,7
+  
+  alloc() → pop slot 2 from free list, return ptr
+  free(C) → push slot 3 onto free list
+</pre>
+  </div>
+
+  <p>Zig's stdlib has <code>std.heap.MemoryPool(T)</code> for exactly this:</p>
+
+<pre><code><span class="kw">const</span> NodePool = std.heap.MemoryPool(Node);
+
+<span class="kw">var</span> pool = NodePool.init(gpa.allocator());
+<span class="kw">defer</span> pool.deinit();
+
+<span class="cmt">// Very fast — no general heap lookup, just free list pop</span>
+<span class="kw">const</span> n1 = <span class="kw">try</span> pool.create();
+<span class="kw">const</span> n2 = <span class="kw">try</span> pool.create();
+n1.* = Node{ .value = <span class="num">1</span>, .next = n2 };
+n2.* = Node{ .value = <span class="num">2</span>, .next = <span class="kw">null</span> };
+
+pool.destroy(n1);  <span class="cmt">// free list push — instant</span>
+pool.destroy(n2);</code></pre>
+
+  <h3>When to use a pool allocator</h3>
+  <ul>
+    <li><strong>Game entities</strong> — thousands of same-sized objects created and destroyed per frame</li>
+    <li><strong>Network connections</strong> — each connection is the same struct size</li>
+    <li><strong>Parse tree nodes</strong> — all nodes are the same union type</li>
+    <li>Anywhere you have many allocations and frees of the same type</li>
+  </ul>
+
+  <h3>Memory layout advantage</h3>
+  <p>Pool-allocated objects of the same type are in contiguous memory. This dramatically improves CPU cache performance — iterating pool objects is cache-friendly, unlike general heap allocations which may be scattered.</p>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch6c')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">A Logging Allocator</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('ex6')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Exercises — Chapter VI</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     EXERCISES — CHAPTER VI
+══════════════════════════════════════════════ -->
+<section class="chapter" id="ex6">
+  <div class="chapter-header">
+    <div class="chapter-number">CHAPTER VI · EXERCISES</div>
+    <div class="chapter-title">Building Allocators</div>
+    <div class="chapter-intro">The culminating exercises. Build real allocator wrappers from scratch.</div>
+  </div>
+
+  <div class="exercise" id="exercise-6-1">
+    <div class="exercise-header">
+      <span class="exercise-badge">Exercise 6.1</span>
+      <span class="exercise-title">Limiting allocator</span>
+    </div>
+    <div class="exercise-body">
+      <div class="exercise-task">
+        <p>Create <code>ex6_1.zig</code>. Build a <code>LimitingAllocator</code> that wraps a backing allocator and returns <code>error.OutOfMemory</code> once a given byte limit is exceeded. Track current usage; if an alloc would push over the limit, return null (fail). Free decrements the count.</p>
+        <ol>
+          <li>Fields: <code>backing: std.mem.Allocator</code>, <code>limit: usize</code>, <code>current: usize</code></li>
+          <li>In <code>alloc</code>: if <code>self.current + len > self.limit</code>, return null</li>
+          <li>In <code>free</code>: decrement <code>self.current</code></li>
+          <li>Test: create one with a 100-byte limit, allocate 80 bytes (succeeds), try to allocate 30 more (fails), free the 80, allocate 100 (succeeds)</li>
+        </ol>
+      </div>
+      <button class="grade-btn" onclick="copyGradePrompt('6.1')">⬡ Copy grade prompt</button>
+      <div class="claude-prompt" id="grade-6.1">
+        <div class="prompt-label">Paste this into Claude Code</div>
+        Grade my solution for exercise 6.1 from the Zig Allocators course. Read `ex6_1.zig`. Check:
+1. LimitingAllocator implements the vtable pattern correctly (alloc/resize/free functions).
+2. `alloc` checks if `current + len > limit` and returns null if so.
+3. `free` correctly decrements `current` by buf.len.
+4. All vtable functions cast ctx back to `*LimitingAllocator` with `@ptrCast(@alignCast(...))`.
+5. The test scenario from the exercise works correctly.
+6. `zig run ex6_1.zig` (or `zig test`) runs cleanly.
+      </div>
+    </div>
+  </div>
+
+  <div class="exercise" id="exercise-6-2">
+    <div class="exercise-header">
+      <span class="exercise-badge">Exercise 6.2</span>
+      <span class="exercise-title">A simple bump allocator</span>
+    </div>
+    <div class="exercise-body">
+      <div class="exercise-task">
+        <p>Create <code>ex6_2.zig</code>. Implement a <code>BumpAllocator</code> from scratch — not using FixedBufferAllocator internally. It should take a <code>[]u8</code> buffer in <code>init</code>, maintain an offset, and hand out slices of the buffer. <code>free</code> is a no-op (like an arena). <code>resize</code> returns false always. Handle alignment properly using <code>std.mem.alignForward</code>.</p>
+        <ol>
+          <li>Fields: <code>buffer: []u8</code>, <code>offset: usize</code></li>
+          <li>In <code>alloc</code>: align offset forward, check bounds, advance offset, return slice</li>
+          <li>Add a <code>reset()</code> method that sets offset to 0</li>
+          <li>Test: allocate a u32 (4 bytes), a u64 (8 bytes), verify pointer alignment</li>
+        </ol>
+      </div>
+      <details class="exercise-hint">
+        <summary>HINT</summary>
+        <p><code>std.mem.alignForward(usize, self.offset, ptr_align)</code> gives you the next aligned offset. Cast <code>ptr_align</code> with <code>@as(usize, 1) << @as(u6, ptr_align)</code> — the vtable passes log2(alignment), not the alignment itself.</p>
+      </details>
+      <button class="grade-btn" onclick="copyGradePrompt('6.2')">⬡ Copy grade prompt</button>
+      <div class="claude-prompt" id="grade-6.2">
+        <div class="prompt-label">Paste this into Claude Code</div>
+        Grade my solution for exercise 6.2 from the Zig Allocators course. Read `ex6_2.zig`. Check:
+1. BumpAllocator implements alloc, resize, free via the vtable pattern.
+2. `alloc` aligns the current offset forward using `std.mem.alignForward` or equivalent.
+3. Bounds checking is done — returns null if buffer is exhausted.
+4. `free` is a no-op (doesn't need to do anything, or just ignores it).
+5. A `reset()` method exists.
+6. Pointer alignment is handled correctly (ptr_align is log2 of alignment in Zig's vtable).
+7. `zig run ex6_2.zig` works and pointers are correctly aligned.
+      </div>
+    </div>
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ch6d')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">A Pool Allocator</span>
+    </button>
+    <button class="chapter-nav-btn next" onclick="showChapter('epilogue')">
+      <span class="nav-dir">Next →</span>
+      <span class="nav-title">Epilogue</span>
+    </button>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════════════
+     EPILOGUE
+══════════════════════════════════════════════ -->
+<section class="chapter" id="epilogue">
+  <div class="chapter-header">
+    <div class="chapter-number">EPILOGUE</div>
+    <div class="chapter-title">Choosing the Right Allocator</div>
+    <div class="chapter-intro">A practical decision guide for real Zig programs.</div>
+  </div>
+
+  <p>You've now covered the full allocator landscape. Here's a condensed decision guide for production code.</p>
+
+  <h2>The Decision Tree</h2>
+
+  <div class="diagram">
+<pre>
+  Do you know the max size at compile time
+  AND it's small enough for the stack?
+  ├── YES → <span class="hi">Stack variable</span>. No allocator needed.
+  └── NO ↓
+
+  Will all allocations be freed together
+  at the end of a logical unit (request, operation)?
+  ├── YES → <span class="hi2">ArenaAllocator</span>. Fast, simple, no individual frees.
+  └── NO ↓
+
+  Do you need a fixed upper bound and no heap?
+  (embedded, no-OS, ultra-low latency)
+  ├── YES → <span class="hi3">FixedBufferAllocator</span>.
+  └── NO ↓
+
+  Are you allocating many same-sized objects?
+  ├── YES → <span class="hi">std.heap.MemoryPool(T)</span> (pool allocator).
+  └── NO ↓
+
+  General use → <span class="hi2">GeneralPurposeAllocator</span>
+  (GPA in debug, consider c_allocator in release if perf critical)
+</pre>
+  </div>
+
+  <h2>Quick Reference Table</h2>
+  <table>
+    <tr><th>Allocator</th><th>Alloc speed</th><th>Free individually?</th><th>Best for</th></tr>
+    <tr><td>Stack variable</td><td>Instant</td><td>Auto (scope)</td><td>Fixed-size, short-lived</td></tr>
+    <tr><td>FixedBufferAllocator</td><td>O(1) bump</td><td>Last only</td><td>Embedded, bounded scratch</td></tr>
+    <tr><td>ArenaAllocator</td><td>O(1) bump</td><td>No (deinit only)</td><td>Request/parse lifetime</td></tr>
+    <tr><td>MemoryPool(T)</td><td>O(1) free list</td><td>Yes (same type)</td><td>Many same-sized objects</td></tr>
+    <tr><td>GeneralPurposeAllocator</td><td>O(1) amortized</td><td>Yes</td><td>General use + debug</td></tr>
+    <tr><td>c_allocator</td><td>O(1) amortized</td><td>Yes</td><td>libc interop, release perf</td></tr>
+    <tr><td>page_allocator</td><td>Syscall</td><td>Yes (page-granular)</td><td>Backing allocator only</td></tr>
+  </table>
+
+  <h2>The golden rules</h2>
+  <ol>
+    <li><strong>Functions that allocate take an allocator parameter.</strong> No hidden global allocations.</li>
+    <li><strong>Every allocation has exactly one owner.</strong> Document it. Honor it.</li>
+    <li><strong>Pair alloc with defer free immediately.</strong> Never let them drift apart in the source.</li>
+    <li><strong>Use errdefer for multi-allocation functions</strong> that return the memory to the caller.</li>
+    <li><strong>Use <code>std.testing.allocator</code> in all tests.</strong> It makes leaks into test failures.</li>
+    <li><strong>Start with GPA in development.</strong> Its debug checks will catch most bugs early.</li>
+  </ol>
+
+  <h2>Where to go from here</h2>
+  <ul>
+    <li>Read the source of <code>std.heap.ArenaAllocator</code> in the Zig stdlib — it's ~150 lines and you'll now understand every line</li>
+    <li>Build your bytecode VM with a pool allocator for instruction nodes</li>
+    <li>Explore <code>std.heap.SbrkAllocator</code> for embedded targets</li>
+    <li>Read about memory arenas in the context of game development (the classic use case)</li>
+  </ul>
+
+  <div class="callout tip">
+    <div class="callout-title">You now understand what most Zig programmers spend months learning</div>
+    The allocator system is the core of how Zig programs manage state. You can now read any Zig library and immediately understand its memory model. That's the whole game.
+  </div>
+
+  <div class="chapter-nav">
+    <button class="chapter-nav-btn" onclick="showChapter('ex6')">
+      <span class="nav-dir">← Previous</span>
+      <span class="nav-title">Exercises — Chapter VI</span>
+    </button>
+    <div></div>
+  </div>
+</section>
+
+</main>
+</div>
+
+<script>
+// ── NAVIGATION ─────────────────────────────────────────────────
+
+const chapterOrder = [
+  'ch0','ch1','ch1b','ch1c','ex1',
+  'ch2','ch2b','ch2c','ex2',
+  'ch3a','ch3b','ch3c','ch3d','ch3e','ex3',
+  'ch4a','ch4b','ch4c','ch4d','ex4',
+  'ch5a','ch5b','ch5c','ch5d','ex5',
+  'ch6a','ch6b','ch6c','ch6d','ex6',
+  'epilogue'
+];
+
+let currentChapter = 'ch0';
+
+function showChapter(id) {
+  document.querySelectorAll('.chapter').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+
+  const chapter = document.getElementById(id);
+  if (chapter) {
+    chapter.classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }
+
+  document.querySelectorAll('.nav-item').forEach(el => {
+    if (el.getAttribute('onclick') === `showChapter('${id}')`) {
+      el.classList.add('active');
+      el.scrollIntoView({ block: 'nearest' });
+    }
+  });
+
+  currentChapter = id;
+  updateProgress();
+  saveProgress();
+}
+
+// ── PROGRESS TRACKING ──────────────────────────────────────────
+
+function updateProgress() {
+  const visited = getVisitedChapters();
+  const total = chapterOrder.length;
+  const count = visited.size;
+  const pct = total > 0 ? (count / total) * 100 : 0;
+
+  document.getElementById('progress-text').textContent = `${count} / ${total} sections`;
+  document.getElementById('progress-fill').style.width = `${pct}%`;
+}
+
+function getVisitedChapters() {
+  try {
+    const stored = localStorage.getItem('zig-alloc-visited');
+    return stored ? new Set(JSON.parse(stored)) : new Set();
+  } catch { return new Set(); }
+}
+
+function saveProgress() {
+  try {
+    const visited = getVisitedChapters();
+    visited.add(currentChapter);
+    localStorage.setItem('zig-alloc-visited', JSON.stringify([...visited]));
+    // Update sidebar completed state
+    updateSidebarCompleted(visited);
+    updateProgress();
+  } catch {}
+}
+
+function updateSidebarCompleted(visited) {
+  document.querySelectorAll('.nav-item').forEach(el => {
+    const onclick = el.getAttribute('onclick') || '';
+    const match = onclick.match(/showChapter\('([^']+)'\)/);
+    if (match && visited.has(match[1])) {
+      el.classList.add('completed');
+    }
+  });
+}
+
+// ── GRADE PROMPT COPY ──────────────────────────────────────────
+
+function copyGradePrompt(id) {
+  const el = document.getElementById(`grade-${id}`);
+  if (!el) return;
+  const text = el.textContent.replace(/^Paste this into Claude Code\n/, '').trim();
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = event.target;
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copied!';
+    btn.style.color = 'var(--green)';
+    setTimeout(() => {
+      btn.textContent = orig;
+      btn.style.color = '';
+    }, 2000);
+  });
+}
+
+// ── INIT ───────────────────────────────────────────────────────
+
+document.addEventListener('DOMContentLoaded', () => {
+  const visited = getVisitedChapters();
+  updateSidebarCompleted(visited);
+  updateProgress();
+
+  // Restore last visited chapter
+  try {
+    const last = localStorage.getItem('zig-alloc-last');
+    if (last && document.getElementById(last)) {
+      showChapter(last);
+    }
+  } catch {}
+});
+
+// Save last chapter separately for restore
+const origShowChapter = showChapter;
+function showChapter(id) {
+  origShowChapter(id);
+  try { localStorage.setItem('zig-alloc-last', id); } catch {}
+}
+</script>
+</body>
+</html>

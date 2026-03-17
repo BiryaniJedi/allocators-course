@@ -47,6 +47,24 @@
     display: flex; align-items: center; padding: 0 2rem;
     gap: 1.5rem;
   }
+  #sidebar-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    color: var(--muted);
+    flex-shrink: 0;
+    transition: color 0.15s, border-color 0.15s;
+    padding: 0;
+  }
+  #sidebar-toggle:hover { color: var(--accent); border-color: var(--accent); }
+  #sidebar-toggle svg { display: block; }
+
   #header h1 {
     font-family: 'Bebas Neue', sans-serif;
     font-size: 1.6rem;
@@ -96,14 +114,25 @@
     width: var(--sidebar-w);
     height: calc(100vh - var(--header-h));
     overflow-y: auto;
+    overflow-x: hidden;
     background: var(--surface);
     border-right: 1px solid var(--border);
     padding: 1.5rem 0;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
+    transition: transform 0.3s ease, opacity 0.3s ease;
   }
   #sidebar::-webkit-scrollbar { width: 4px; }
   #sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  body.sidebar-hidden #sidebar {
+    transform: translateX(-100%);
+    opacity: 0;
+    pointer-events: none;
+  }
+  body.sidebar-hidden #content {
+    margin-left: 0;
+  }
 
   .nav-chapter {
     padding: 0.4rem 1.5rem 0.2rem;
@@ -145,6 +174,7 @@
     flex: 1;
     max-width: 860px;
     padding: 3rem 4rem 6rem;
+    transition: margin-left 0.3s ease;
   }
 
   /* ── CHAPTERS ───────────────────────────── */
@@ -500,6 +530,37 @@
   .mem-cell.stack { background: rgba(107,164,224,0.15); border-color: #6ba4e080; color: var(--blue); }
   .mem-label { padding-left: 0.5rem; color: var(--muted); font-size: 0.65rem; align-self: center; }
 
+  /* ── COLLAPSIBLE NAV GROUPS ─────────────── */
+  .nav-chapter {
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    align-items: center;
+    gap: 0.4em;
+  }
+  .nav-chapter:hover { color: var(--accent2); }
+  .nav-toggle {
+    font-size: 0.55rem;
+    color: var(--accent2);
+    flex-shrink: 0;
+    transition: transform 0.25s ease;
+    display: inline-block;
+    margin-top: 1px;
+  }
+  .nav-group.collapsed .nav-toggle {
+    transform: rotate(-90deg);
+  }
+  .nav-group-items {
+    overflow: hidden;
+    max-height: 400px;
+    transition: max-height 0.3s ease, opacity 0.25s ease;
+    opacity: 1;
+  }
+  .nav-group.collapsed .nav-group-items {
+    max-height: 0;
+    opacity: 0;
+  }
+
   /* scrollbar for sidebar */
   #sidebar { scrollbar-gutter: stable; }
 
@@ -515,6 +576,13 @@
 
 <!-- HEADER -->
 <header id="header">
+  <button id="sidebar-toggle" onclick="toggleSidebar()" title="Toggle sidebar" aria-label="Toggle sidebar">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="1" y="3" width="14" height="1.5" rx="0.75" fill="currentColor"/>
+      <rect x="1" y="7.25" width="14" height="1.5" rx="0.75" fill="currentColor"/>
+      <rect x="1" y="11.5" width="14" height="1.5" rx="0.75" fill="currentColor"/>
+    </svg>
+  </button>
   <div>
     <h1>ZIG ALLOCATORS</h1>
     <div class="subtitle">A COMPLETE COURSE · EXERCISES INCLUDED</div>
@@ -529,52 +597,100 @@
 
 <!-- SIDEBAR -->
 <nav id="sidebar">
-  <div class="nav-chapter">PROLOGUE</div>
-  <a class="nav-item" onclick="showChapter('ch0')">0. What is an allocator?</a>
+  <div class="nav-group open" data-group="prologue">
+    <div class="nav-chapter" onclick="toggleNavGroup(this)">
+      <span class="nav-toggle">▼</span>PROLOGUE
+    </div>
+    <div class="nav-group-items">
+      <a class="nav-item" onclick="showChapter('ch0')">0. What is an allocator?</a>
+    </div>
+  </div>
 
-  <div class="nav-chapter">CHAPTER I — THE STACK & HEAP</div>
-  <a class="nav-item" onclick="showChapter('ch1')">1.1 Stack memory</a>
-  <a class="nav-item" onclick="showChapter('ch1b')">1.2 Heap memory</a>
-  <a class="nav-item" onclick="showChapter('ch1c')">1.3 Why manual allocation?</a>
-  <a class="nav-item exercise-link" onclick="showChapter('ex1')">⬡ Exercises — Chapter I</a>
+  <div class="nav-group open" data-group="ch1">
+    <div class="nav-chapter" onclick="toggleNavGroup(this)">
+      <span class="nav-toggle">▼</span>CHAPTER I — THE STACK &amp; HEAP
+    </div>
+    <div class="nav-group-items">
+      <a class="nav-item" onclick="showChapter('ch1')">1.1 Stack memory</a>
+      <a class="nav-item" onclick="showChapter('ch1b')">1.2 Heap memory</a>
+      <a class="nav-item" onclick="showChapter('ch1c')">1.3 Why manual allocation?</a>
+      <a class="nav-item exercise-link" onclick="showChapter('ex1')">⬡ Exercises — Chapter I</a>
+    </div>
+  </div>
 
-  <div class="nav-chapter">CHAPTER II — THE ALLOCATOR INTERFACE</div>
-  <a class="nav-item" onclick="showChapter('ch2')">2.1 std.mem.Allocator</a>
-  <a class="nav-item" onclick="showChapter('ch2b')">2.2 alloc, free, create, destroy</a>
-  <a class="nav-item" onclick="showChapter('ch2c')">2.3 Passing allocators around</a>
-  <a class="nav-item exercise-link" onclick="showChapter('ex2')">⬡ Exercises — Chapter II</a>
+  <div class="nav-group open" data-group="ch2">
+    <div class="nav-chapter" onclick="toggleNavGroup(this)">
+      <span class="nav-toggle">▼</span>CHAPTER II — THE ALLOCATOR INTERFACE
+    </div>
+    <div class="nav-group-items">
+      <a class="nav-item" onclick="showChapter('ch2')">2.1 std.mem.Allocator</a>
+      <a class="nav-item" onclick="showChapter('ch2b')">2.2 alloc, free, create, destroy</a>
+      <a class="nav-item" onclick="showChapter('ch2c')">2.3 Passing allocators around</a>
+      <a class="nav-item exercise-link" onclick="showChapter('ex2')">⬡ Exercises — Chapter II</a>
+    </div>
+  </div>
 
-  <div class="nav-chapter">CHAPTER III — STANDARD ALLOCATORS</div>
-  <a class="nav-item" onclick="showChapter('ch3a')">3.1 GeneralPurposeAllocator</a>
-  <a class="nav-item" onclick="showChapter('ch3b')">3.2 ArenaAllocator</a>
-  <a class="nav-item" onclick="showChapter('ch3c')">3.3 FixedBufferAllocator</a>
-  <a class="nav-item" onclick="showChapter('ch3d')">3.4 C allocator & page allocator</a>
-  <a class="nav-item" onclick="showChapter('ch3e')">3.5 StackFallbackAllocator</a>
-  <a class="nav-item exercise-link" onclick="showChapter('ex3')">⬡ Exercises — Chapter III</a>
+  <div class="nav-group open" data-group="ch3">
+    <div class="nav-chapter" onclick="toggleNavGroup(this)">
+      <span class="nav-toggle">▼</span>CHAPTER III — STANDARD ALLOCATORS
+    </div>
+    <div class="nav-group-items">
+      <a class="nav-item" onclick="showChapter('ch3a')">3.1 GeneralPurposeAllocator</a>
+      <a class="nav-item" onclick="showChapter('ch3b')">3.2 ArenaAllocator</a>
+      <a class="nav-item" onclick="showChapter('ch3c')">3.3 FixedBufferAllocator</a>
+      <a class="nav-item" onclick="showChapter('ch3d')">3.4 C allocator &amp; page allocator</a>
+      <a class="nav-item" onclick="showChapter('ch3e')">3.5 StackFallbackAllocator</a>
+      <a class="nav-item exercise-link" onclick="showChapter('ex3')">⬡ Exercises — Chapter III</a>
+    </div>
+  </div>
 
-  <div class="nav-chapter">CHAPTER IV — MEMORY SAFETY</div>
-  <a class="nav-item" onclick="showChapter('ch4a')">4.1 Leaks &amp; GPA detection</a>
-  <a class="nav-item" onclick="showChapter('ch4b')">4.2 Use-after-free</a>
-  <a class="nav-item" onclick="showChapter('ch4c')">4.3 Double-free</a>
-  <a class="nav-item" onclick="showChapter('ch4d')">4.4 Dangling pointers</a>
-  <a class="nav-item exercise-link" onclick="showChapter('ex4')">⬡ Exercises — Chapter IV</a>
+  <div class="nav-group open" data-group="ch4">
+    <div class="nav-chapter" onclick="toggleNavGroup(this)">
+      <span class="nav-toggle">▼</span>CHAPTER IV — MEMORY SAFETY
+    </div>
+    <div class="nav-group-items">
+      <a class="nav-item" onclick="showChapter('ch4a')">4.1 Leaks &amp; GPA detection</a>
+      <a class="nav-item" onclick="showChapter('ch4b')">4.2 Use-after-free</a>
+      <a class="nav-item" onclick="showChapter('ch4c')">4.3 Double-free</a>
+      <a class="nav-item" onclick="showChapter('ch4d')">4.4 Dangling pointers</a>
+      <a class="nav-item exercise-link" onclick="showChapter('ex4')">⬡ Exercises — Chapter IV</a>
+    </div>
+  </div>
 
-  <div class="nav-chapter">CHAPTER V — OWNERSHIP PATTERNS</div>
-  <a class="nav-item" onclick="showChapter('ch5a')">5.1 Who owns the allocation?</a>
-  <a class="nav-item" onclick="showChapter('ch5b')">5.2 init/deinit pattern</a>
-  <a class="nav-item" onclick="showChapter('ch5c')">5.3 Returning allocated memory</a>
-  <a class="nav-item" onclick="showChapter('ch5d')">5.4 Allocators in structs</a>
-  <a class="nav-item exercise-link" onclick="showChapter('ex5')">⬡ Exercises — Chapter V</a>
+  <div class="nav-group open" data-group="ch5">
+    <div class="nav-chapter" onclick="toggleNavGroup(this)">
+      <span class="nav-toggle">▼</span>CHAPTER V — OWNERSHIP PATTERNS
+    </div>
+    <div class="nav-group-items">
+      <a class="nav-item" onclick="showChapter('ch5a')">5.1 Who owns the allocation?</a>
+      <a class="nav-item" onclick="showChapter('ch5b')">5.2 init/deinit pattern</a>
+      <a class="nav-item" onclick="showChapter('ch5c')">5.3 Returning allocated memory</a>
+      <a class="nav-item" onclick="showChapter('ch5d')">5.4 Allocators in structs</a>
+      <a class="nav-item exercise-link" onclick="showChapter('ex5')">⬡ Exercises — Chapter V</a>
+    </div>
+  </div>
 
-  <div class="nav-chapter">CHAPTER VI — BUILDING ALLOCATORS</div>
-  <a class="nav-item" onclick="showChapter('ch6a')">6.1 The Allocator vtable</a>
-  <a class="nav-item" onclick="showChapter('ch6b')">6.2 A counting allocator</a>
-  <a class="nav-item" onclick="showChapter('ch6c')">6.3 A logging allocator</a>
-  <a class="nav-item" onclick="showChapter('ch6d')">6.4 A pool allocator</a>
-  <a class="nav-item exercise-link" onclick="showChapter('ex6')">⬡ Exercises — Chapter VI</a>
+  <div class="nav-group open" data-group="ch6">
+    <div class="nav-chapter" onclick="toggleNavGroup(this)">
+      <span class="nav-toggle">▼</span>CHAPTER VI — BUILDING ALLOCATORS
+    </div>
+    <div class="nav-group-items">
+      <a class="nav-item" onclick="showChapter('ch6a')">6.1 The Allocator vtable</a>
+      <a class="nav-item" onclick="showChapter('ch6b')">6.2 A counting allocator</a>
+      <a class="nav-item" onclick="showChapter('ch6c')">6.3 A logging allocator</a>
+      <a class="nav-item" onclick="showChapter('ch6d')">6.4 A pool allocator</a>
+      <a class="nav-item exercise-link" onclick="showChapter('ex6')">⬡ Exercises — Chapter VI</a>
+    </div>
+  </div>
 
-  <div class="nav-chapter">EPILOGUE</div>
-  <a class="nav-item" onclick="showChapter('epilogue')">Choosing the right allocator</a>
+  <div class="nav-group open" data-group="epilogue">
+    <div class="nav-chapter" onclick="toggleNavGroup(this)">
+      <span class="nav-toggle">▼</span>EPILOGUE
+    </div>
+    <div class="nav-group-items">
+      <a class="nav-item" onclick="showChapter('epilogue')">Choosing the right allocator</a>
+    </div>
+  </div>
 </nav>
 
 <!-- MAIN CONTENT -->
@@ -2849,6 +2965,9 @@ function showChapter(id) {
   document.querySelectorAll('.nav-item').forEach(el => {
     if (el.getAttribute('onclick') === `showChapter('${id}')`) {
       el.classList.add('active');
+      // Auto-expand the group containing this item
+      const group = el.closest('.nav-group');
+      if (group) group.classList.remove('collapsed');
       el.scrollIntoView({ block: 'nearest' });
     }
   });
@@ -2856,6 +2975,7 @@ function showChapter(id) {
   currentChapter = id;
   updateProgress();
   saveProgress();
+  try { localStorage.setItem('zig-alloc-last', id); } catch {}
 }
 
 // ── PROGRESS TRACKING ──────────────────────────────────────────
@@ -2898,6 +3018,42 @@ function updateSidebarCompleted(visited) {
   });
 }
 
+// ── SIDEBAR TOGGLE ─────────────────────────────────────────────
+
+function toggleSidebar() {
+  const hidden = document.body.classList.toggle('sidebar-hidden');
+  try { localStorage.setItem('zig-alloc-sidebar', hidden ? '0' : '1'); } catch {}
+}
+
+// ── COLLAPSIBLE TOC ────────────────────────────────────────────
+
+function toggleNavGroup(header) {
+  const group = header.closest('.nav-group');
+  group.classList.toggle('collapsed');
+  saveGroupState();
+}
+
+function saveGroupState() {
+  try {
+    const state = {};
+    document.querySelectorAll('.nav-group[data-group]').forEach(g => {
+      state[g.dataset.group] = !g.classList.contains('collapsed');
+    });
+    localStorage.setItem('zig-alloc-groups', JSON.stringify(state));
+  } catch {}
+}
+
+function restoreGroupState() {
+  try {
+    const stored = localStorage.getItem('zig-alloc-groups');
+    if (!stored) return;
+    const state = JSON.parse(stored);
+    document.querySelectorAll('.nav-group[data-group]').forEach(g => {
+      if (state[g.dataset.group] === false) g.classList.add('collapsed');
+    });
+  } catch {}
+}
+
 // ── GRADE PROMPT COPY ──────────────────────────────────────────
 
 function copyGradePrompt(id) {
@@ -2922,6 +3078,14 @@ document.addEventListener('DOMContentLoaded', () => {
   const visited = getVisitedChapters();
   updateSidebarCompleted(visited);
   updateProgress();
+  restoreGroupState();
+
+  // Restore sidebar open/closed state
+  try {
+    if (localStorage.getItem('zig-alloc-sidebar') === '0') {
+      document.body.classList.add('sidebar-hidden');
+    }
+  } catch {}
 
   // Restore last visited chapter
   try {
@@ -2931,13 +3095,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   } catch {}
 });
-
-// Save last chapter separately for restore
-const origShowChapter = showChapter;
-function showChapter(id) {
-  origShowChapter(id);
-  try { localStorage.setItem('zig-alloc-last', id); } catch {}
-}
 </script>
 </body>
 </html>
